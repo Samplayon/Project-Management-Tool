@@ -577,10 +577,19 @@ textarea:focus {
   gap: 6px;
 }
 
-.checklist-item-schedule {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.checklist-due-label {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 180px);
   gap: 6px;
+  align-items: center;
+  justify-self: start;
+}
+
+.checklist-due-input {
+  width: 180px;
+  min-height: 32px;
+  padding: 5px 7px;
+  font-size: 13px;
 }
 
 .checklist-row .icon-button {
@@ -633,8 +642,7 @@ textarea:focus {
   .right-panel,
   .two-column,
   .timer-row,
-  .checklist-group-heading,
-  .checklist-item-schedule {
+  .checklist-group-heading {
     grid-template-columns: 1fr;
   }
 

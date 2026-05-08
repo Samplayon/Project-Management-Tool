@@ -147,7 +147,6 @@ function normalizeChecklistItem(item) {
     text: normalizeText(item?.text),
     done: Boolean(item?.done),
     dueAt: item?.dueAt || "",
-    timerAt: item?.timerAt || "",
     notified: item?.notified && typeof item.notified === "object" ? item.notified : {},
   };
 }
@@ -188,15 +187,11 @@ function getChecklistProgress(task) {
   const dueDates = checklists.reduce((sum, checklist) => (
     sum + checklist.items.filter((item) => item.dueAt).length
   ), 0);
-  const timers = checklists.reduce((sum, checklist) => (
-    sum + checklist.items.filter((item) => item.timerAt).length
-  ), 0);
   return {
     total,
     done,
     dueDates,
     groups: checklists.length,
-    timers,
     percent: total ? Math.round((done / total) * 100) : 0,
   };
 }
@@ -384,7 +379,7 @@ function matchesFilters(task) {
   const query = state.search.toLowerCase();
   const checklistText = normalizeChecklistGroups(task.checklist)
     .map((checklist) => checklist.items.map((item) => (
-      `${checklist.title} ${item.text} ${formatDateTime(item.dueAt)} ${formatDateTime(item.timerAt)}`
+      `${checklist.title} ${item.text} ${formatDateTime(item.dueAt)}`
     )).join(" "))
     .join(" ");
   const haystack = `${task.title} ${task.project} ${task.notes} ${checklistText}`.toLowerCase();
@@ -506,7 +501,6 @@ function renderTaskCard(task) {
         <span class="pill">${escapeHtml(checklistLabel)}</span>
         ${progress.groups > 1 && progress.total ? `<span class="pill">${progress.groups} checklists</span>` : ""}
         ${progress.dueDates ? `<span class="pill">${progress.dueDates} item due date${progress.dueDates === 1 ? "" : "s"}</span>` : ""}
-        ${progress.timers ? `<span class="pill">${progress.timers} item timer${progress.timers === 1 ? "" : "s"}</span>` : ""}
       </div>
       ${progress.total ? `<div class="progress-bar" aria-label="Checklist progress">
         <div class="progress-fill" style="width: ${progress.percent}%"></div>
@@ -615,7 +609,7 @@ function addTaskFromForm(event) {
     .split("\n")
     .map((text) => normalizeText(text))
     .filter(Boolean)
-    .map((text) => ({ id: uid("check"), text, done: false, dueAt: "", timerAt: "", notified: {} }));
+    .map((text) => ({ id: uid("check"), text, done: false, dueAt: "", notified: {} }));
   const checklist = checklistItems.length
     ? [{ id: uid("checklist"), title: "Checklist", items: checklistItems }]
     : [];
@@ -696,16 +690,10 @@ function renderChecklistItemEditor(item) {
       <input type="checkbox" ${item.done ? "checked" : ""} aria-label="Checklist item complete">
       <div class="checklist-row-body">
         <input type="text" value="${escapeAttr(item.text)}" aria-label="Checklist item text">
-        <div class="checklist-item-schedule">
-          <label>
-            Due date
-            <input class="checklist-due-input" type="datetime-local" value="${escapeAttr(toLocalInputValue(item.dueAt))}">
-          </label>
-          <label>
-            Timer
-            <input class="checklist-timer-input" type="datetime-local" value="${escapeAttr(toLocalInputValue(item.timerAt))}">
-          </label>
-        </div>
+        <label class="checklist-due-label">
+          <span>Due</span>
+          <input class="checklist-due-input" type="datetime-local" value="${escapeAttr(toLocalInputValue(item.dueAt))}">
+        </label>
       </div>
       <button class="icon-button" type="button" data-checklist-action="remove-item" aria-label="Remove checklist item">x</button>
     </div>
@@ -731,11 +719,9 @@ function collectChecklistEditor() {
       const items = [...group.querySelectorAll(".checklist-row")].map((row) => {
         const id = row.dataset.checkId || uid("check");
         const dueInputValue = row.querySelector(".checklist-due-input")?.value || "";
-        const timerInputValue = row.querySelector(".checklist-timer-input")?.value || "";
         const dueAt = dueInputValue ? new Date(dueInputValue).toISOString() : "";
-        const timerAt = timerInputValue ? new Date(timerInputValue).toISOString() : "";
         const existing = findExistingChecklistItem(els.editTaskId.value, id);
-        const notified = existing?.dueAt === dueAt && existing?.timerAt === timerAt
+        const notified = existing?.dueAt === dueAt
           ? existing.notified
           : {};
 
@@ -744,7 +730,6 @@ function collectChecklistEditor() {
           done: row.querySelector('input[type="checkbox"]').checked,
           text: normalizeText(row.querySelector('input[type="text"]').value),
           dueAt,
-          timerAt,
           notified,
         };
       }).filter((item) => item.text);
@@ -883,12 +868,6 @@ function checkNotifications() {
       checklist.items.forEach((item) => {
         if (item.done) return;
         const itemLabel = `${task.title}: ${item.text}`;
-
-        if (item.timerAt && !item.notified?.timer && parseLocalDate(item.timerAt)?.getTime() <= current) {
-          sendAlert("Checklist timer", itemLabel, `Timer hit for ${itemLabel}`);
-          item.notified = { ...item.notified, timer: true };
-          changed = true;
-        }
 
         if (item.dueAt && !item.notified?.due && parseLocalDate(item.dueAt)?.getTime() <= current) {
           sendAlert("Checklist item due", itemLabel, `${itemLabel} is due now`);
