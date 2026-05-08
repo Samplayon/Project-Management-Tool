@@ -121,16 +121,24 @@ function isSameDay(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-function getTaskDueState(task) {
-  if (!task.dueAt) return "none";
-  const due = parseLocalDate(task.dueAt);
+function getDueState(value, isComplete = false) {
+  if (!value) return "none";
+  const due = parseLocalDate(value);
   if (!due) return "none";
   const current = new Date();
-  if (task.status !== "done" && due.getTime() < nowMs()) return "overdue";
+  if (!isComplete && due.getTime() < nowMs()) return "overdue";
   if (isSameDay(due, current)) return "today";
   const weekAhead = nowMs() + 7 * 24 * 60 * 60 * 1000;
   if (due.getTime() <= weekAhead) return "week";
   return "later";
+}
+
+function getTaskDueState(task) {
+  return getDueState(task.dueAt, task.status === "done");
+}
+
+function getChecklistItemDueState(item) {
+  return getDueState(item.dueAt, item.done);
 }
 
 function normalizeChecklistItem(item) {
@@ -138,6 +146,9 @@ function normalizeChecklistItem(item) {
     id: item?.id || uid("check"),
     text: normalizeText(item?.text),
     done: Boolean(item?.done),
+    dueAt: item?.dueAt || "",
+    timerAt: item?.timerAt || "",
+    notified: item?.notified && typeof item.notified === "object" ? item.notified : {},
   };
 }
 
@@ -174,10 +185,18 @@ function getChecklistProgress(task) {
   const done = checklists.reduce((sum, checklist) => (
     sum + checklist.items.filter((item) => item.done).length
   ), 0);
+  const dueDates = checklists.reduce((sum, checklist) => (
+    sum + checklist.items.filter((item) => item.dueAt).length
+  ), 0);
+  const timers = checklists.reduce((sum, checklist) => (
+    sum + checklist.items.filter((item) => item.timerAt).length
+  ), 0);
   return {
     total,
     done,
+    dueDates,
     groups: checklists.length,
+    timers,
     percent: total ? Math.round((done / total) * 100) : 0,
   };
 }
@@ -364,7 +383,9 @@ function persist() {
 function matchesFilters(task) {
   const query = state.search.toLowerCase();
   const checklistText = normalizeChecklistGroups(task.checklist)
-    .map((checklist) => `${checklist.title} ${checklist.items.map((item) => item.text).join(" ")}`)
+    .map((checklist) => checklist.items.map((item) => (
+      `${checklist.title} ${item.text} ${formatDateTime(item.dueAt)} ${formatDateTime(item.timerAt)}`
+    )).join(" "))
     .join(" ");
   const haystack = `${task.title} ${task.project} ${task.notes} ${checklistText}`.toLowerCase();
   const matchesSearch = !query || haystack.includes(query);
@@ -484,6 +505,8 @@ function renderTaskCard(task) {
       <div class="checklist-preview">
         <span class="pill">${escapeHtml(checklistLabel)}</span>
         ${progress.groups > 1 && progress.total ? `<span class="pill">${progress.groups} checklists</span>` : ""}
+        ${progress.dueDates ? `<span class="pill">${progress.dueDates} item due date${progress.dueDates === 1 ? "" : "s"}</span>` : ""}
+        ${progress.timers ? `<span class="pill">${progress.timers} item timer${progress.timers === 1 ? "" : "s"}</span>` : ""}
       </div>
       ${progress.total ? `<div class="progress-bar" aria-label="Checklist progress">
         <div class="progress-fill" style="width: ${progress.percent}%"></div>
@@ -516,18 +539,37 @@ function renderAlerts() {
 }
 
 function renderDueSoon() {
-  const upcoming = state.tasks
+  const taskEntries = state.tasks
     .filter((task) => task.status !== "done" && task.dueAt)
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      subtitle: task.project || "No project",
+      dueAt: task.dueAt,
+      dueState: getTaskDueState(task),
+    }));
+  const checklistEntries = state.tasks.flatMap((task) => normalizeChecklistGroups(task.checklist)
+    .flatMap((checklist) => checklist.items
+      .filter((item) => !item.done && item.dueAt)
+      .map((item) => ({
+        id: task.id,
+        title: item.text,
+        subtitle: `${task.title} / ${checklist.title}`,
+        dueAt: item.dueAt,
+        dueState: getChecklistItemDueState(item),
+      }))));
+  const upcoming = [...taskEntries, ...checklistEntries]
     .sort((a, b) => parseLocalDate(a.dueAt).getTime() - parseLocalDate(b.dueAt).getTime())
     .slice(0, 8);
 
-  els.dueSoonList.innerHTML = upcoming.length ? upcoming.map((task) => `
-    <button class="due-item" type="button" data-task-id="${escapeAttr(task.id)}">
+  els.dueSoonList.innerHTML = upcoming.length ? upcoming.map((entry) => `
+    <button class="due-item" type="button" data-task-id="${escapeAttr(entry.id)}">
       <span>
-        <strong>${escapeHtml(task.title)}</strong>
-        <span class="due-time">${escapeHtml(formatDateTime(task.dueAt))}</span>
+        <strong>${escapeHtml(entry.title)}</strong>
+        <span>${escapeHtml(entry.subtitle)}</span>
+        <span class="due-time">${escapeHtml(formatDateTime(entry.dueAt))}</span>
       </span>
-      <span class="pill ${getTaskDueState(task)}">${escapeHtml(task.project || "No project")}</span>
+      <span class="pill ${entry.dueState}">${entry.dueState === "overdue" ? "Overdue" : "Due"}</span>
     </button>
   `).join("") : `<p class="empty-state">Nothing scheduled.</p>`;
 }
@@ -573,7 +615,7 @@ function addTaskFromForm(event) {
     .split("\n")
     .map((text) => normalizeText(text))
     .filter(Boolean)
-    .map((text) => ({ id: uid("check"), text, done: false }));
+    .map((text) => ({ id: uid("check"), text, done: false, dueAt: "", timerAt: "", notified: {} }));
   const checklist = checklistItems.length
     ? [{ id: uid("checklist"), title: "Checklist", items: checklistItems }]
     : [];
@@ -652,21 +694,60 @@ function renderChecklistItemEditor(item) {
   return `
     <div class="checklist-row" data-check-id="${escapeAttr(item.id)}">
       <input type="checkbox" ${item.done ? "checked" : ""} aria-label="Checklist item complete">
-      <input type="text" value="${escapeAttr(item.text)}" aria-label="Checklist item text">
+      <div class="checklist-row-body">
+        <input type="text" value="${escapeAttr(item.text)}" aria-label="Checklist item text">
+        <div class="checklist-item-schedule">
+          <label>
+            Due date
+            <input class="checklist-due-input" type="datetime-local" value="${escapeAttr(toLocalInputValue(item.dueAt))}">
+          </label>
+          <label>
+            Timer
+            <input class="checklist-timer-input" type="datetime-local" value="${escapeAttr(toLocalInputValue(item.timerAt))}">
+          </label>
+        </div>
+      </div>
       <button class="icon-button" type="button" data-checklist-action="remove-item" aria-label="Remove checklist item">x</button>
     </div>
   `;
+}
+
+function findExistingChecklistItem(taskId, checkId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task || !checkId) return null;
+
+  for (const checklist of normalizeChecklistGroups(task.checklist)) {
+    const existing = checklist.items.find((item) => item.id === checkId);
+    if (existing) return existing;
+  }
+
+  return null;
 }
 
 function collectChecklistEditor() {
   return [...els.editChecklistList.querySelectorAll(".checklist-group")]
     .map((group, index) => {
       const title = normalizeText(group.querySelector(".checklist-title-input")?.value);
-      const items = [...group.querySelectorAll(".checklist-row")].map((row) => ({
-        id: row.dataset.checkId || uid("check"),
-        done: row.querySelector('input[type="checkbox"]').checked,
-        text: normalizeText(row.querySelector('input[type="text"]').value),
-      })).filter((item) => item.text);
+      const items = [...group.querySelectorAll(".checklist-row")].map((row) => {
+        const id = row.dataset.checkId || uid("check");
+        const dueInputValue = row.querySelector(".checklist-due-input")?.value || "";
+        const timerInputValue = row.querySelector(".checklist-timer-input")?.value || "";
+        const dueAt = dueInputValue ? new Date(dueInputValue).toISOString() : "";
+        const timerAt = timerInputValue ? new Date(timerInputValue).toISOString() : "";
+        const existing = findExistingChecklistItem(els.editTaskId.value, id);
+        const notified = existing?.dueAt === dueAt && existing?.timerAt === timerAt
+          ? existing.notified
+          : {};
+
+        return {
+          id,
+          done: row.querySelector('input[type="checkbox"]').checked,
+          text: normalizeText(row.querySelector('input[type="text"]').value),
+          dueAt,
+          timerAt,
+          notified,
+        };
+      }).filter((item) => item.text);
 
       if (!title && !items.length) return null;
 
@@ -784,6 +865,8 @@ function checkNotifications() {
 
   state.tasks.forEach((task) => {
     if (task.status === "done") return;
+    task.checklist = normalizeChecklistGroups(task.checklist);
+
     if (task.reminderAt && !task.notified?.reminder && parseLocalDate(task.reminderAt)?.getTime() <= current) {
       sendAlert("Reminder", task.title, `Reminder hit for ${task.title}`);
       task.notified = { ...task.notified, reminder: true };
@@ -795,6 +878,25 @@ function checkNotifications() {
       task.notified = { ...task.notified, due: true };
       changed = true;
     }
+
+    task.checklist.forEach((checklist) => {
+      checklist.items.forEach((item) => {
+        if (item.done) return;
+        const itemLabel = `${task.title}: ${item.text}`;
+
+        if (item.timerAt && !item.notified?.timer && parseLocalDate(item.timerAt)?.getTime() <= current) {
+          sendAlert("Checklist timer", itemLabel, `Timer hit for ${itemLabel}`);
+          item.notified = { ...item.notified, timer: true };
+          changed = true;
+        }
+
+        if (item.dueAt && !item.notified?.due && parseLocalDate(item.dueAt)?.getTime() <= current) {
+          sendAlert("Checklist item due", itemLabel, `${itemLabel} is due now`);
+          item.notified = { ...item.notified, due: true };
+          changed = true;
+        }
+      });
+    });
   });
 
   state.timers.forEach((timer) => {

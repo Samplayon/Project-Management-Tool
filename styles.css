@@ -562,13 +562,25 @@ textarea:focus {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 40px;
   gap: 6px;
-  align-items: center;
+  align-items: start;
 }
 
 .checklist-row input[type="checkbox"] {
   width: 18px;
   height: 18px;
+  margin-top: 9px;
   justify-self: center;
+}
+
+.checklist-row-body {
+  display: grid;
+  gap: 6px;
+}
+
+.checklist-item-schedule {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
 }
 
 .checklist-row .icon-button {
@@ -621,7 +633,8 @@ textarea:focus {
   .right-panel,
   .two-column,
   .timer-row,
-  .checklist-group-heading {
+  .checklist-group-heading,
+  .checklist-item-schedule {
     grid-template-columns: 1fr;
   }
 
