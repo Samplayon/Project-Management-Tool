@@ -1,9 +1,20 @@
 const SYNC_API_URL = "/api/project-data";
+const HOME_TODO_ID = "home-todo";
+const DEFAULT_HOME_TODO_TITLE = "To-do list";
+
+const DEFAULT_STATUSES = [
+  { id: "todo", label: "To do" },
+  { id: "active", label: "In progress" },
+  { id: "waiting", label: "Waiting" },
+  { id: "done", label: "Done" },
+];
 
 const EMPTY_REMOTE_STATE = {
   tasks: [],
   alerts: [],
   timers: [],
+  statuses: DEFAULT_STATUSES,
+  todoLists: [createDefaultHomeTodo()],
 };
 
 const LEGACY_LOCAL_STORAGE_KEYS = {
@@ -12,17 +23,12 @@ const LEGACY_LOCAL_STORAGE_KEYS = {
   timers: "project-desk-timers-v1",
 };
 
-const STATUSES = [
-  { id: "todo", label: "To do" },
-  { id: "active", label: "In progress" },
-  { id: "waiting", label: "Waiting" },
-  { id: "done", label: "Done" },
-];
-
 const state = {
   tasks: [],
   alerts: [],
   timers: [],
+  statuses: createDefaultStatuses(),
+  todoLists: [createDefaultHomeTodo()],
   search: "",
   project: "all",
   due: "all",
@@ -56,6 +62,13 @@ const els = {
   searchInput: document.querySelector("#search-input"),
   projectFilter: document.querySelector("#project-filter"),
   dueFilter: document.querySelector("#due-filter"),
+  addListButton: document.querySelector("#add-list-button"),
+  homeTodoTitle: document.querySelector("#home-todo-title"),
+  homeTodoNotes: document.querySelector("#home-todo-notes"),
+  homeTodoChecklistShell: document.querySelector("#home-todo-checklist-shell"),
+  homeTodoChecklist: document.querySelector("#home-todo-checklist"),
+  homeTodoAddItem: document.querySelector("#home-todo-add-item"),
+  homeTodoModeButtons: [...document.querySelectorAll("[data-todo-mode]")],
   alertList: document.querySelector("#alert-list"),
   clearAlerts: document.querySelector("#clear-alerts"),
   dueSoonList: document.querySelector("#due-soon-list"),
@@ -90,6 +103,92 @@ function uid(prefix) {
 
 function normalizeText(value) {
   return (value || "").trim();
+}
+
+function createDefaultStatuses() {
+  return DEFAULT_STATUSES.map((status) => ({ ...status }));
+}
+
+function createDefaultHomeTodo() {
+  return {
+    id: HOME_TODO_ID,
+    title: DEFAULT_HOME_TODO_TITLE,
+    mode: "notes",
+    notes: "",
+    items: [],
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
+
+function toStatusIdBase(label) {
+  return normalizeText(label).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "list";
+}
+
+function createStatusId(label, statuses = state.statuses) {
+  const base = toStatusIdBase(label);
+  const existingIds = new Set(statuses.map((status) => status.id));
+  let id = base;
+  let suffix = 2;
+
+  while (existingIds.has(id)) {
+    id = `${base}-${suffix}`;
+    suffix += 1;
+  }
+
+  return id;
+}
+
+function statusLabelFromId(statusId) {
+  return normalizeText(statusId)
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => capitalize(part))
+    .join(" ") || "List";
+}
+
+function normalizeStatuses(statuses, tasks = []) {
+  const source = Array.isArray(statuses) && statuses.length ? statuses : createDefaultStatuses();
+  const normalized = [];
+  const seenIds = new Set();
+
+  source.forEach((status, index) => {
+    const label = normalizeText(status?.label) || `List ${index + 1}`;
+    const base = normalizeText(status?.id) || toStatusIdBase(label);
+    let id = base;
+    let suffix = 2;
+
+    while (seenIds.has(id)) {
+      id = `${base}-${suffix}`;
+      suffix += 1;
+    }
+
+    normalized.push({ id, label });
+    seenIds.add(id);
+  });
+
+  tasks.forEach((task) => {
+    if (!task.status || seenIds.has(task.status)) return;
+    normalized.push({
+      id: task.status,
+      label: statusLabelFromId(task.status),
+    });
+    seenIds.add(task.status);
+  });
+
+  return normalized.length ? normalized : createDefaultStatuses();
+}
+
+function getDefaultStatusId() {
+  return state.statuses[0]?.id || "todo";
+}
+
+function getHomeTodoList() {
+  if (!state.todoLists.length) {
+    state.todoLists = [createDefaultHomeTodo()];
+  }
+
+  return state.todoLists[0];
 }
 
 function nowMs() {
@@ -142,7 +241,7 @@ function getTaskDueState(task) {
 }
 
 function getStatusById(statusId) {
-  return STATUSES.find((status) => status.id === statusId) || null;
+  return state.statuses.find((status) => status.id === statusId) || null;
 }
 
 function getChecklistItemDueState(item) {
@@ -205,10 +304,14 @@ function getChecklistProgress(task) {
 }
 
 function normalizeRemoteState(remoteState) {
+  const tasks = Array.isArray(remoteState?.tasks) ? remoteState.tasks.map(normalizeTask) : [];
+
   return {
-    tasks: Array.isArray(remoteState?.tasks) ? remoteState.tasks.map(normalizeTask) : [],
+    tasks,
     alerts: Array.isArray(remoteState?.alerts) ? remoteState.alerts.map(normalizeAlert) : [],
     timers: Array.isArray(remoteState?.timers) ? remoteState.timers.map(normalizeTimer) : [],
+    statuses: normalizeStatuses(remoteState?.statuses, tasks),
+    todoLists: normalizeTodoLists(remoteState?.todoLists || remoteState?.todoList),
   };
 }
 
@@ -248,8 +351,48 @@ function normalizeTimer(timer) {
   };
 }
 
+function normalizeTodoLists(todoLists) {
+  const source = Array.isArray(todoLists) ? todoLists : todoLists ? [todoLists] : [];
+  const normalized = source.map(normalizeTodoList).filter(Boolean);
+  return normalized.length ? normalized : [createDefaultHomeTodo()];
+}
+
+function normalizeTodoList(todoList) {
+  if (!todoList || typeof todoList !== "object") return null;
+  const createdAt = Number(todoList.createdAt) || nowMs();
+
+  return {
+    id: todoList.id || HOME_TODO_ID,
+    title: normalizeText(todoList.title) || DEFAULT_HOME_TODO_TITLE,
+    mode: todoList.mode === "checklist" ? "checklist" : "notes",
+    notes: typeof todoList.notes === "string" ? todoList.notes : "",
+    items: Array.isArray(todoList.items) ? todoList.items.map(normalizeTodoItem) : [],
+    createdAt,
+    updatedAt: Number(todoList.updatedAt) || createdAt,
+  };
+}
+
+function normalizeTodoItem(item) {
+  return {
+    id: item?.id || uid("todo-item"),
+    text: typeof item?.text === "string" ? item.text : "",
+    done: Boolean(item?.done),
+  };
+}
+
+function hasTodoListContent(todoList) {
+  return Boolean(
+    normalizeText(todoList?.notes)
+    || normalizeText(todoList?.title) !== DEFAULT_HOME_TODO_TITLE
+    || todoList?.items?.some((item) => normalizeText(item.text) || item.done)
+  );
+}
+
 function getStateItemCount(savedState) {
-  return savedState.tasks.length + savedState.alerts.length + savedState.timers.length;
+  return savedState.tasks.length
+    + savedState.alerts.length
+    + savedState.timers.length
+    + savedState.todoLists.filter(hasTodoListContent).length;
 }
 
 function mergeRecordsById(primaryRecords, secondaryRecords, timestampKey) {
@@ -269,10 +412,15 @@ function mergeRecordsById(primaryRecords, secondaryRecords, timestampKey) {
 }
 
 function mergeSavedStates(remoteState, legacyState) {
+  const tasks = mergeRecordsById(remoteState.tasks, legacyState.tasks, "updatedAt");
+  const todoLists = remoteState.todoLists.some(hasTodoListContent) ? remoteState.todoLists : legacyState.todoLists;
+
   return {
-    tasks: mergeRecordsById(remoteState.tasks, legacyState.tasks, "updatedAt"),
+    tasks,
     alerts: mergeRecordsById(remoteState.alerts, legacyState.alerts, "createdAt"),
     timers: mergeRecordsById(remoteState.timers, legacyState.timers, "createdAt"),
+    statuses: normalizeStatuses(remoteState.statuses, tasks),
+    todoLists,
   };
 }
 
@@ -297,6 +445,8 @@ function getPersistableState() {
     tasks: state.tasks,
     alerts: state.alerts,
     timers: state.timers,
+    statuses: state.statuses,
+    todoLists: state.todoLists,
   };
 }
 
@@ -329,6 +479,8 @@ async function loadRemoteState() {
     state.tasks = remoteState.tasks;
     state.alerts = remoteState.alerts;
     state.timers = remoteState.timers;
+    state.statuses = remoteState.statuses;
+    state.todoLists = remoteState.todoLists;
 
     const legacyState = loadLegacyLocalState();
     if (getStateItemCount(legacyState) > 0) {
@@ -336,6 +488,8 @@ async function loadRemoteState() {
       state.tasks = mergedState.tasks;
       state.alerts = mergedState.alerts;
       state.timers = mergedState.timers;
+      state.statuses = mergedState.statuses;
+      state.todoLists = mergedState.todoLists;
       await persist();
 
       if (!state.sync.error) {
@@ -354,6 +508,7 @@ async function loadRemoteState() {
 
 let pendingSaveCount = 0;
 let saveQueue = Promise.resolve();
+let homeTodoSaveTimer = null;
 
 function persist() {
   const snapshot = getPersistableState();
@@ -381,6 +536,14 @@ function persist() {
     });
 
   return saveQueue;
+}
+
+function scheduleHomeTodoPersist() {
+  window.clearTimeout(homeTodoSaveTimer);
+  homeTodoSaveTimer = window.setTimeout(() => {
+    homeTodoSaveTimer = null;
+    persist();
+  }, 450);
 }
 
 function matchesFilters(task) {
@@ -416,6 +579,8 @@ function getVisibleTasks() {
 }
 
 function render() {
+  renderStatusControls();
+  renderHomeTodo();
   renderProjectFilter();
   renderSummary();
   renderBoard();
@@ -454,6 +619,58 @@ function renderProjectFilter() {
   state.project = els.projectFilter.value;
 }
 
+function renderStatusControls() {
+  const taskStatus = getStatusById(els.taskStatus.value) ? els.taskStatus.value : getDefaultStatusId();
+  const editStatus = getStatusById(els.editStatus.value) ? els.editStatus.value : getDefaultStatusId();
+
+  renderStatusOptions(els.taskStatus, taskStatus);
+  renderStatusOptions(els.editStatus, editStatus);
+}
+
+function renderStatusOptions(select, selectedStatusId) {
+  if (!select) return;
+
+  select.innerHTML = state.statuses.map((status) => (
+    `<option value="${escapeAttr(status.id)}">${escapeHtml(status.label)}</option>`
+  )).join("");
+  select.value = getStatusById(selectedStatusId) ? selectedStatusId : getDefaultStatusId();
+}
+
+function renderHomeTodo() {
+  const todoList = getHomeTodoList();
+  const isChecklistMode = todoList.mode === "checklist";
+
+  if (document.activeElement !== els.homeTodoTitle) {
+    els.homeTodoTitle.value = todoList.title;
+  }
+
+  if (document.activeElement !== els.homeTodoNotes) {
+    els.homeTodoNotes.value = todoList.notes;
+  }
+
+  els.homeTodoModeButtons.forEach((button) => {
+    const isActive = button.dataset.todoMode === todoList.mode;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+
+  els.homeTodoNotes.hidden = isChecklistMode;
+  els.homeTodoChecklistShell.hidden = !isChecklistMode;
+  els.homeTodoChecklist.innerHTML = todoList.items.length
+    ? todoList.items.map(renderHomeTodoItem).join("")
+    : `<p class="empty-state">No checklist items yet.</p>`;
+}
+
+function renderHomeTodoItem(item) {
+  return `
+    <div class="home-todo-item ${item.done ? "done" : ""}" data-todo-item-id="${escapeAttr(item.id)}">
+      <input type="checkbox" ${item.done ? "checked" : ""} aria-label="To-do item complete">
+      <input class="home-todo-item-text" type="text" value="${escapeAttr(item.text)}" aria-label="To-do item text">
+      <button class="icon-button" type="button" data-todo-action="remove-item" aria-label="Remove to-do item">x</button>
+    </div>
+  `;
+}
+
 function renderSummary() {
   const activeTasks = state.tasks.filter((task) => task.status !== "done");
   const overdue = activeTasks.filter((task) => getTaskDueState(task) === "overdue").length;
@@ -476,13 +693,17 @@ function renderSummary() {
 
 function renderBoard() {
   const visible = getVisibleTasks();
-  els.board.innerHTML = STATUSES.map((status) => {
+  els.board.style.setProperty("--board-column-count", state.statuses.length);
+  els.board.innerHTML = state.statuses.map((status) => {
     const tasks = visible.filter((task) => task.status === status.id);
     return `
       <section class="board-column" aria-label="${escapeAttr(status.label)} tasks" data-status-id="${escapeAttr(status.id)}">
         <div class="column-header">
           <h2 class="column-title">${escapeHtml(status.label)}</h2>
-          <span class="column-count">${tasks.length}</span>
+          <div class="column-header-actions">
+            <span class="column-count">${tasks.length}</span>
+            <button class="icon-button column-delete-button" type="button" data-status-action="delete" data-status-id="${escapeAttr(status.id)}" aria-label="Delete ${escapeAttr(status.label)} list">x</button>
+          </div>
         </div>
         <div class="task-list" data-status-id="${escapeAttr(status.id)}">
           ${tasks.length ? tasks.map(renderTaskCard).join("") : `<p class="empty-state">No tasks here.</p>`}
@@ -638,7 +859,7 @@ function addTaskFromForm(event) {
   });
 
   els.taskForm.reset();
-  els.taskStatus.value = "todo";
+  els.taskStatus.value = getDefaultStatusId();
   els.taskPriority.value = "normal";
   persist();
   render();
@@ -991,10 +1212,122 @@ function moveTaskToStatus(taskId, statusId) {
   showToast(`Moved to ${status.label}`);
 }
 
+function addStatus() {
+  const label = normalizeText(window.prompt("Name the new list"));
+  if (!label) return;
+
+  const duplicate = state.statuses.some((status) => status.label.toLowerCase() === label.toLowerCase());
+  if (duplicate) {
+    showToast("That list already exists");
+    return;
+  }
+
+  const status = {
+    id: createStatusId(label),
+    label,
+  };
+
+  state.statuses.push(status);
+  persist();
+  render();
+  els.taskStatus.value = status.id;
+  showToast(`${status.label} list added`);
+}
+
+function deleteStatus(statusId) {
+  const status = getStatusById(statusId);
+  if (!status) return;
+
+  if (state.statuses.length <= 1) {
+    showToast("Keep at least one list on the board");
+    return;
+  }
+
+  const tasksInStatus = state.tasks.filter((task) => task.status === status.id);
+  const remainingStatuses = state.statuses.filter((item) => item.id !== status.id);
+  const fallbackStatus = remainingStatuses[0];
+  const taskMessage = tasksInStatus.length
+    ? ` ${tasksInStatus.length} task${tasksInStatus.length === 1 ? "" : "s"} will move to ${fallbackStatus.label}.`
+    : "";
+
+  if (!window.confirm(`Delete the ${status.label} list?${taskMessage}`)) return;
+
+  state.statuses = remainingStatuses;
+  state.tasks = state.tasks.map((task) => {
+    if (task.status !== status.id) return task;
+    return {
+      ...task,
+      status: fallbackStatus.id,
+      updatedAt: nowMs(),
+    };
+  });
+
+  persist();
+  render();
+  showToast(`${status.label} list deleted`);
+}
+
+function updateHomeTodo(updates, shouldRender = false, saveImmediately = false) {
+  const todoList = getHomeTodoList();
+  const currentTime = nowMs();
+
+  Object.assign(todoList, updates, {
+    createdAt: todoList.createdAt || currentTime,
+    updatedAt: currentTime,
+  });
+
+  if (saveImmediately) {
+    window.clearTimeout(homeTodoSaveTimer);
+    homeTodoSaveTimer = null;
+    persist();
+  } else {
+    scheduleHomeTodoPersist();
+  }
+
+  if (shouldRender) {
+    renderHomeTodo();
+  }
+}
+
+function updateHomeTodoItem(itemId, updates, shouldRender = false, saveImmediately = false) {
+  const todoList = getHomeTodoList();
+  const items = todoList.items.map((item) => (
+    item.id === itemId ? { ...item, ...updates } : item
+  ));
+
+  updateHomeTodo({ items }, shouldRender, saveImmediately);
+}
+
+function addHomeTodoItem() {
+  const todoList = getHomeTodoList();
+  const item = {
+    id: uid("todo-item"),
+    text: "",
+    done: false,
+  };
+
+  updateHomeTodo({ items: [...todoList.items, item] }, true, true);
+  els.homeTodoChecklist.querySelector(".home-todo-item:last-child .home-todo-item-text")?.focus();
+}
+
+function removeHomeTodoItem(itemId) {
+  const todoList = getHomeTodoList();
+  updateHomeTodo({
+    items: todoList.items.filter((item) => item.id !== itemId),
+  }, true, true);
+}
+
 els.taskForm.addEventListener("submit", addTaskFromForm);
 els.timerForm.addEventListener("submit", startTimer);
 
 els.board.addEventListener("click", (event) => {
+  const statusAction = event.target.closest("[data-status-action]");
+  if (statusAction) {
+    event.preventDefault();
+    deleteStatus(statusAction.dataset.statusId);
+    return;
+  }
+
   const card = event.target.closest("[data-task-id]");
   if (card) openTask(card.dataset.taskId);
 });
@@ -1069,6 +1402,45 @@ els.projectFilter.addEventListener("change", (event) => {
 els.dueFilter.addEventListener("change", (event) => {
   state.due = event.target.value;
   renderBoard();
+});
+
+els.addListButton.addEventListener("click", addStatus);
+
+els.homeTodoTitle.addEventListener("input", (event) => {
+  updateHomeTodo({ title: event.target.value || DEFAULT_HOME_TODO_TITLE });
+});
+
+els.homeTodoNotes.addEventListener("input", (event) => {
+  updateHomeTodo({ notes: event.target.value });
+});
+
+els.homeTodoModeButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    updateHomeTodo({
+      mode: button.dataset.todoMode === "checklist" ? "checklist" : "notes",
+    }, true, true);
+  });
+});
+
+els.homeTodoAddItem.addEventListener("click", addHomeTodoItem);
+
+els.homeTodoChecklist.addEventListener("input", (event) => {
+  const item = event.target.closest(".home-todo-item");
+  if (!item || !event.target.classList.contains("home-todo-item-text")) return;
+  updateHomeTodoItem(item.dataset.todoItemId, { text: event.target.value });
+});
+
+els.homeTodoChecklist.addEventListener("change", (event) => {
+  const item = event.target.closest(".home-todo-item");
+  if (!item || event.target.type !== "checkbox") return;
+  updateHomeTodoItem(item.dataset.todoItemId, { done: event.target.checked }, true, true);
+});
+
+els.homeTodoChecklist.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-todo-action='remove-item']");
+  if (!button) return;
+  const item = button.closest(".home-todo-item");
+  if (item) removeHomeTodoItem(item.dataset.todoItemId);
 });
 
 els.clearAlerts.addEventListener("click", () => {

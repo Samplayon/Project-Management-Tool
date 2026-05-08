@@ -34,6 +34,18 @@ const TABLES = {
     jsonColumns: [],
     numberColumns: ["endsAt", "createdAt", "completedAt"],
   },
+  statuses: {
+    sheetName: "Lists",
+    columns: ["id", "label"],
+    jsonColumns: [],
+    numberColumns: [],
+  },
+  todoLists: {
+    sheetName: "To Do Lists",
+    columns: ["id", "title", "mode", "notes", "items", "createdAt", "updatedAt"],
+    jsonColumns: ["items"],
+    numberColumns: ["createdAt", "updatedAt"],
+  },
 };
 
 function doGet() {
@@ -87,6 +99,8 @@ function readState_() {
     tasks: readTable_(spreadsheet, TABLES.tasks),
     alerts: readTable_(spreadsheet, TABLES.alerts),
     timers: readTable_(spreadsheet, TABLES.timers),
+    statuses: readTable_(spreadsheet, TABLES.statuses),
+    todoLists: readTable_(spreadsheet, TABLES.todoLists),
   };
 }
 
@@ -95,6 +109,8 @@ function writeState_(state) {
   writeTable_(spreadsheet, TABLES.tasks, state.tasks);
   writeTable_(spreadsheet, TABLES.alerts, state.alerts);
   writeTable_(spreadsheet, TABLES.timers, state.timers);
+  writeTable_(spreadsheet, TABLES.statuses, state.statuses);
+  writeTable_(spreadsheet, TABLES.todoLists, state.todoLists);
 }
 
 function readTable_(spreadsheet, table) {
@@ -128,7 +144,7 @@ function rowToRecord_(row, table) {
 
 function valueToCell_(value, column, table) {
   if (table.jsonColumns.indexOf(column) >= 0) {
-    return JSON.stringify(value || (column === "checklist" ? [] : {}));
+    return JSON.stringify(value || getDefaultJsonValue_(column));
   }
 
   if (value === null || value === undefined) return "";
@@ -137,11 +153,11 @@ function valueToCell_(value, column, table) {
 
 function cellToValue_(value, column, table) {
   if (table.jsonColumns.indexOf(column) >= 0) {
-    if (!value) return column === "checklist" ? [] : {};
+    if (!value) return getDefaultJsonValue_(column);
     try {
       return JSON.parse(value);
     } catch (error) {
-      return column === "checklist" ? [] : {};
+      return getDefaultJsonValue_(column);
     }
   }
 
@@ -150,6 +166,10 @@ function cellToValue_(value, column, table) {
   }
 
   return value === null || value === undefined ? "" : String(value);
+}
+
+function getDefaultJsonValue_(column) {
+  return column === "checklist" || column === "items" ? [] : {};
 }
 
 function getSpreadsheet_() {
@@ -187,6 +207,8 @@ function normalizeState_(state) {
     tasks: Array.isArray(state && state.tasks) ? state.tasks : [],
     alerts: Array.isArray(state && state.alerts) ? state.alerts : [],
     timers: Array.isArray(state && state.timers) ? state.timers : [],
+    statuses: Array.isArray(state && state.statuses) ? state.statuses : [],
+    todoLists: Array.isArray(state && state.todoLists) ? state.todoLists : [],
   };
 }
 

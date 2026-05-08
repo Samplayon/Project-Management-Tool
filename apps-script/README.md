@@ -1,6 +1,6 @@
 # Project Desk Apps Script storage
 
-This script stores Project Desk data in a Google Sheet named `Project Desk Data`.
+This script stores Project Desk data in a Google Sheet named `Project Desk Data`, including tasks, alerts, timers, board lists, and the home to-do list.
 
 ## Setup
 
@@ -14,3 +14,5 @@ This script stores Project Desk data in a Google Sheet named `Project Desk Data`
 8. Redeploy the Vercel project.
 
 The browser app talks only to `/api/project-data`. The Vercel function sends the private secret to Apps Script, so the secret is not exposed in `app.js`.
+
+When adding new storage tables, redeploy `Code.gs` and run `setupProjectDeskStorage` again so the spreadsheet has the latest sheets.

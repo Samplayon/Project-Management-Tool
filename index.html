@@ -92,6 +92,24 @@
         </aside>
 
         <section class="main-panel">
+          <section class="home-todo-window" aria-label="Home to-do list">
+            <div class="home-todo-header">
+              <label class="home-todo-title-label">
+                To-do list title
+                <input id="home-todo-title" type="text" autocomplete="off">
+              </label>
+              <div class="todo-mode-toggle" role="group" aria-label="To-do list mode">
+                <button class="mode-button" type="button" data-todo-mode="notes" aria-pressed="true">Free type</button>
+                <button class="mode-button" type="button" data-todo-mode="checklist" aria-pressed="false">Checklist</button>
+              </div>
+            </div>
+            <textarea id="home-todo-notes" class="home-todo-notes" rows="12" aria-label="Free type to-do list"></textarea>
+            <div class="home-todo-checklist-shell" id="home-todo-checklist-shell" hidden>
+              <div id="home-todo-checklist" class="home-todo-checklist"></div>
+              <button class="secondary-button" id="home-todo-add-item" type="button">Add item</button>
+            </div>
+          </section>
+
           <div class="toolbar">
             <label class="search-label">
               Search
@@ -113,6 +131,7 @@
                 <option value="none">No due date</option>
               </select>
             </label>
+            <button class="secondary-button toolbar-button" id="add-list-button" type="button">New list</button>
           </div>
 
           <div class="summary-strip" id="summary-strip" aria-live="polite"></div>

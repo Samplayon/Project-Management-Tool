@@ -256,12 +256,105 @@ textarea:focus {
   align-content: start;
 }
 
+.home-todo-window {
+  display: grid;
+  gap: 10px;
+  min-height: 360px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 12px;
+}
+
+.home-todo-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.home-todo-title-label input {
+  min-height: 42px;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.todo-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.mode-button {
+  min-height: 40px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 12px;
+  font-weight: 900;
+}
+
+.mode-button:last-child {
+  border-right: 0;
+}
+
+.mode-button.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.home-todo-notes {
+  min-height: 270px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.home-todo-checklist-shell {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-height: 270px;
+}
+
+.home-todo-checklist {
+  display: grid;
+  gap: 8px;
+}
+
+.home-todo-item {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 40px;
+  gap: 8px;
+  align-items: center;
+}
+
+.home-todo-item input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  justify-self: center;
+}
+
+.home-todo-item.done .home-todo-item-text {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(160px, 210px) minmax(160px, 210px);
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 210px) minmax(160px, 210px) auto;
   gap: 8px;
   padding: 10px;
   border-radius: 8px;
+}
+
+.toolbar-button {
+  align-self: end;
+  white-space: nowrap;
 }
 
 .summary-strip {
@@ -292,7 +385,7 @@ textarea:focus {
 
 .board {
   display: grid;
-  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  grid-template-columns: repeat(var(--board-column-count, 4), minmax(220px, 1fr));
   gap: 10px;
   align-items: start;
   min-width: 0;
@@ -315,11 +408,18 @@ textarea:focus {
 
 .column-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 9px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--panel-muted);
+}
+
+.column-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .column-title {
@@ -333,6 +433,12 @@ textarea:focus {
   color: var(--muted);
   font-size: 13px;
   font-weight: 800;
+}
+
+.column-delete-button {
+  min-height: 28px;
+  width: 28px;
+  font-size: 14px;
 }
 
 .task-list {
@@ -656,6 +762,7 @@ textarea:focus {
   .topbar,
   .workspace,
   .toolbar,
+  .home-todo-header,
   .summary-strip,
   .board,
   .right-panel,
@@ -681,5 +788,13 @@ textarea:focus {
   .topbar-actions .primary-button,
   .topbar-actions .secondary-button {
     width: 100%;
+  }
+
+  .todo-mode-toggle {
+    width: 100%;
+  }
+
+  .mode-button {
+    flex: 1;
   }
 }

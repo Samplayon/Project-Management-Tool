@@ -5,6 +5,8 @@ const EMPTY_STATE = {
   tasks: [],
   alerts: [],
   timers: [],
+  statuses: [],
+  todoLists: [],
 };
 
 function normalizeState(state) {
@@ -12,6 +14,8 @@ function normalizeState(state) {
     tasks: Array.isArray(state?.tasks) ? state.tasks : [],
     alerts: Array.isArray(state?.alerts) ? state.alerts : [],
     timers: Array.isArray(state?.timers) ? state.timers : [],
+    statuses: Array.isArray(state?.statuses) ? state.statuses : [],
+    todoLists: Array.isArray(state?.todoLists) ? state.todoLists : [],
   };
 }
 
