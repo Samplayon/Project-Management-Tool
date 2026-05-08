@@ -81,6 +81,20 @@ button {
   text-transform: uppercase;
 }
 
+.sync-status {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.sync-status.error {
+  color: var(--danger);
+}
+
+.sync-status.saving {
+  color: var(--accent);
+}
+
 .topbar-actions,
 .dialog-actions > div,
 .section-heading-row {

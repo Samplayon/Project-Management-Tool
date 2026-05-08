@@ -1,6 +1,16 @@
-const STORAGE_KEY = "project-desk-tasks-v1";
-const ALERT_KEY = "project-desk-alerts-v1";
-const TIMER_KEY = "project-desk-timers-v1";
+const SYNC_API_URL = "/api/project-data";
+
+const EMPTY_REMOTE_STATE = {
+  tasks: [],
+  alerts: [],
+  timers: [],
+};
+
+const LEGACY_LOCAL_STORAGE_KEYS = {
+  tasks: "project-desk-tasks-v1",
+  alerts: "project-desk-alerts-v1",
+  timers: "project-desk-timers-v1",
+};
 
 const STATUSES = [
   { id: "todo", label: "To do" },
@@ -10,12 +20,17 @@ const STATUSES = [
 ];
 
 const state = {
-  tasks: loadJson(STORAGE_KEY, []),
-  alerts: loadJson(ALERT_KEY, []),
-  timers: loadJson(TIMER_KEY, []),
+  tasks: [],
+  alerts: [],
+  timers: [],
   search: "",
   project: "all",
   due: "all",
+  sync: {
+    ready: false,
+    saving: false,
+    error: "",
+  },
 };
 
 const els = {
@@ -59,20 +74,8 @@ const els = {
   deleteTask: document.querySelector("#delete-task"),
   closeDialog: document.querySelector("#close-dialog"),
   cancelEdit: document.querySelector("#cancel-edit"),
+  syncStatus: document.querySelector("#sync-status"),
 };
-
-function loadJson(key, fallback) {
-  try {
-    const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : fallback;
-  } catch (error) {
-    return fallback;
-  }
-}
-
-function saveJson(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
-}
 
 function uid(prefix) {
   if (window.crypto && window.crypto.randomUUID) {
@@ -131,20 +134,195 @@ function getTaskDueState(task) {
 }
 
 function getChecklistProgress(task) {
-  const total = task.checklist.length;
-  const done = task.checklist.filter((item) => item.done).length;
+  const checklist = Array.isArray(task.checklist) ? task.checklist : [];
+  const total = checklist.length;
+  const done = checklist.filter((item) => item.done).length;
   return { total, done, percent: total ? Math.round((done / total) * 100) : 0 };
 }
 
+function normalizeRemoteState(remoteState) {
+  return {
+    tasks: Array.isArray(remoteState?.tasks) ? remoteState.tasks.map(normalizeTask) : [],
+    alerts: Array.isArray(remoteState?.alerts) ? remoteState.alerts.map(normalizeAlert) : [],
+    timers: Array.isArray(remoteState?.timers) ? remoteState.timers.map(normalizeTimer) : [],
+  };
+}
+
+function normalizeTask(task) {
+  return {
+    id: task.id || uid("task"),
+    title: task.title || "",
+    project: task.project || "",
+    notes: task.notes || "",
+    status: task.status || "todo",
+    priority: task.priority || "normal",
+    dueAt: task.dueAt || "",
+    reminderAt: task.reminderAt || "",
+    checklist: Array.isArray(task.checklist) ? task.checklist : [],
+    createdAt: Number(task.createdAt) || nowMs(),
+    updatedAt: Number(task.updatedAt) || nowMs(),
+    notified: task.notified && typeof task.notified === "object" ? task.notified : {},
+  };
+}
+
+function normalizeAlert(alert) {
+  return {
+    id: alert.id || uid("alert"),
+    title: alert.title || "",
+    message: alert.message || "",
+    createdAt: Number(alert.createdAt) || nowMs(),
+  };
+}
+
+function normalizeTimer(timer) {
+  return {
+    id: timer.id || uid("timer"),
+    label: timer.label || "",
+    endsAt: Number(timer.endsAt) || nowMs(),
+    createdAt: Number(timer.createdAt) || nowMs(),
+    completedAt: timer.completedAt ? Number(timer.completedAt) : null,
+  };
+}
+
+function getStateItemCount(savedState) {
+  return savedState.tasks.length + savedState.alerts.length + savedState.timers.length;
+}
+
+function mergeRecordsById(primaryRecords, secondaryRecords, timestampKey) {
+  const recordsById = new Map(primaryRecords.map((record) => [record.id, record]));
+
+  secondaryRecords.forEach((record) => {
+    const current = recordsById.get(record.id);
+    const currentTime = Number(current?.[timestampKey] || current?.createdAt || 0);
+    const nextTime = Number(record?.[timestampKey] || record?.createdAt || 0);
+
+    if (!current || nextTime >= currentTime) {
+      recordsById.set(record.id, record);
+    }
+  });
+
+  return [...recordsById.values()];
+}
+
+function mergeSavedStates(remoteState, legacyState) {
+  return {
+    tasks: mergeRecordsById(remoteState.tasks, legacyState.tasks, "updatedAt"),
+    alerts: mergeRecordsById(remoteState.alerts, legacyState.alerts, "createdAt"),
+    timers: mergeRecordsById(remoteState.timers, legacyState.timers, "createdAt"),
+  };
+}
+
+function loadLegacyLocalState() {
+  try {
+    return normalizeRemoteState({
+      tasks: JSON.parse(localStorage.getItem(LEGACY_LOCAL_STORAGE_KEYS.tasks) || "[]"),
+      alerts: JSON.parse(localStorage.getItem(LEGACY_LOCAL_STORAGE_KEYS.alerts) || "[]"),
+      timers: JSON.parse(localStorage.getItem(LEGACY_LOCAL_STORAGE_KEYS.timers) || "[]"),
+    });
+  } catch (error) {
+    return normalizeRemoteState(EMPTY_REMOTE_STATE);
+  }
+}
+
+function clearLegacyLocalState() {
+  Object.values(LEGACY_LOCAL_STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+}
+
+function getPersistableState() {
+  return {
+    tasks: state.tasks,
+    alerts: state.alerts,
+    timers: state.timers,
+  };
+}
+
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      Accept: "application/json",
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...options.headers,
+    },
+  });
+  const body = await response.json().catch(() => ({}));
+
+  if (!response.ok || body.ok === false) {
+    throw new Error(body.error || `Request failed with status ${response.status}`);
+  }
+
+  return body;
+}
+
+async function loadRemoteState() {
+  state.sync.ready = false;
+  state.sync.error = "";
+  renderSyncStatus();
+
+  try {
+    const response = await requestJson(SYNC_API_URL);
+    const remoteState = normalizeRemoteState(response.state || EMPTY_REMOTE_STATE);
+    state.tasks = remoteState.tasks;
+    state.alerts = remoteState.alerts;
+    state.timers = remoteState.timers;
+
+    const legacyState = loadLegacyLocalState();
+    if (getStateItemCount(legacyState) > 0) {
+      const mergedState = mergeSavedStates(remoteState, legacyState);
+      state.tasks = mergedState.tasks;
+      state.alerts = mergedState.alerts;
+      state.timers = mergedState.timers;
+      await persist();
+
+      if (!state.sync.error) {
+        clearLegacyLocalState();
+        showToast("Moved local browser data to Google Drive");
+      }
+    }
+  } catch (error) {
+    state.sync.error = error.message;
+    showToast(`Drive sync failed: ${error.message}`);
+  } finally {
+    state.sync.ready = true;
+    renderSyncStatus();
+  }
+}
+
+let pendingSaveCount = 0;
+let saveQueue = Promise.resolve();
+
 function persist() {
-  saveJson(STORAGE_KEY, state.tasks);
-  saveJson(ALERT_KEY, state.alerts);
-  saveJson(TIMER_KEY, state.timers);
+  const snapshot = getPersistableState();
+  pendingSaveCount += 1;
+  state.sync.saving = true;
+  renderSyncStatus();
+
+  saveQueue = saveQueue
+    .catch(() => {})
+    .then(() => requestJson(SYNC_API_URL, {
+      method: "POST",
+      body: JSON.stringify({ state: snapshot }),
+    }))
+    .then(() => {
+      state.sync.error = "";
+    })
+    .catch((error) => {
+      state.sync.error = error.message;
+      showToast(`Drive save failed: ${error.message}`);
+    })
+    .finally(() => {
+      pendingSaveCount = Math.max(0, pendingSaveCount - 1);
+      state.sync.saving = pendingSaveCount > 0;
+      renderSyncStatus();
+    });
+
+  return saveQueue;
 }
 
 function matchesFilters(task) {
   const query = state.search.toLowerCase();
-  const checklistText = task.checklist.map((item) => item.text).join(" ");
+  const checklist = Array.isArray(task.checklist) ? task.checklist : [];
+  const checklistText = checklist.map((item) => item.text).join(" ");
   const haystack = `${task.title} ${task.project} ${task.notes} ${checklistText}`.toLowerCase();
   const matchesSearch = !query || haystack.includes(query);
   const matchesProject = state.project === "all" || (task.project || "No project") === state.project;
@@ -178,6 +356,24 @@ function render() {
   renderDueSoon();
   renderTimers();
   renderNotificationButton();
+  renderSyncStatus();
+}
+
+function renderSyncStatus() {
+  if (!els.syncStatus) return;
+
+  els.syncStatus.classList.toggle("error", Boolean(state.sync.error));
+  els.syncStatus.classList.toggle("saving", state.sync.saving);
+
+  if (state.sync.error) {
+    els.syncStatus.textContent = `Google Drive sync unavailable: ${state.sync.error}`;
+  } else if (state.sync.saving) {
+    els.syncStatus.textContent = "Saving to Google Drive...";
+  } else if (state.sync.ready) {
+    els.syncStatus.textContent = "Synced with Google Drive";
+  } else {
+    els.syncStatus.textContent = "Connecting to Google Drive...";
+  }
 }
 
 function renderProjectFilter() {
@@ -641,5 +837,11 @@ els.editChecklistList.addEventListener("change", () => {
   render();
 });
 
-window.setInterval(checkNotifications, 1000);
-render();
+async function initialize() {
+  render();
+  await loadRemoteState();
+  render();
+  window.setInterval(checkNotifications, 1000);
+}
+
+initialize();
