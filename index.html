@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Project Desk</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Project Desk</p>
+          <h1>Task command center</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="secondary-button" id="notification-permission" type="button">Enable notifications</button>
+          <button class="primary-button" id="new-task-button" type="button">New task</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="left-panel" aria-label="Task tools">
+          <section class="panel-section">
+            <h2>New task</h2>
+            <form id="task-form" class="task-form">
+              <label>
+                Task name
+                <input id="task-title" name="title" type="text" autocomplete="off" required placeholder="Write launch checklist">
+              </label>
+              <label>
+                Project
+                <input id="task-project" name="project" type="text" autocomplete="off" placeholder="Personal, Daily Ops, Home">
+              </label>
+              <label>
+                Notes
+                <textarea id="task-notes" name="notes" rows="4" placeholder="Add context, links, or decisions"></textarea>
+              </label>
+              <div class="two-column">
+                <label>
+                  Status
+                  <select id="task-status" name="status">
+                    <option value="todo">To do</option>
+                    <option value="active">In progress</option>
+                    <option value="waiting">Waiting</option>
+                    <option value="done">Done</option>
+                  </select>
+                </label>
+                <label>
+                  Priority
+                  <select id="task-priority" name="priority">
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                Due date
+                <input id="task-due" name="due" type="datetime-local">
+              </label>
+              <label>
+                Reminder time
+                <input id="task-reminder" name="reminder" type="datetime-local">
+              </label>
+              <label>
+                Checklist items
+                <textarea id="task-checklist" name="checklist" rows="4" placeholder="One item per line"></textarea>
+              </label>
+              <button class="primary-button full-width" type="submit">Add task</button>
+            </form>
+          </section>
+
+          <section class="panel-section">
+            <h2>Focus timer</h2>
+            <form id="timer-form" class="timer-form">
+              <label>
+                Timer label
+                <input id="timer-label" type="text" autocomplete="off" placeholder="Deep work block">
+              </label>
+              <div class="timer-row">
+                <label>
+                  Minutes
+                  <input id="timer-minutes" type="number" min="1" max="240" value="25">
+                </label>
+                <button class="secondary-button" type="submit">Start</button>
+              </div>
+            </form>
+            <div id="timer-list" class="timer-list" aria-live="polite"></div>
+          </section>
+        </aside>
+
+        <section class="main-panel">
+          <div class="toolbar">
+            <label class="search-label">
+              Search
+              <input id="search-input" type="search" placeholder="Task, project, note, checklist">
+            </label>
+            <label>
+              Project
+              <select id="project-filter">
+                <option value="all">All projects</option>
+              </select>
+            </label>
+            <label>
+              Due
+              <select id="due-filter">
+                <option value="all">All due dates</option>
+                <option value="overdue">Overdue</option>
+                <option value="today">Due today</option>
+                <option value="week">Due this week</option>
+                <option value="none">No due date</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="summary-strip" id="summary-strip" aria-live="polite"></div>
+
+          <div class="board" id="board" aria-label="Task board"></div>
+        </section>
+
+        <aside class="right-panel" aria-label="Notifications">
+          <section class="panel-section">
+            <div class="section-heading-row">
+              <h2>Alerts</h2>
+              <button class="ghost-button" id="clear-alerts" type="button">Clear</button>
+            </div>
+            <div id="alert-list" class="alert-list" aria-live="polite"></div>
+          </section>
+          <section class="panel-section">
+            <h2>Due soon</h2>
+            <div id="due-soon-list" class="due-soon-list"></div>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <dialog id="task-dialog" class="task-dialog">
+      <form class="dialog-shell" id="edit-task-form">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Edit task</p>
+            <h2 id="dialog-title">Task</h2>
+          </div>
+          <button class="icon-button" id="close-dialog" aria-label="Close dialog" type="button">x</button>
+        </div>
+
+        <input id="edit-task-id" type="hidden">
+        <label>
+          Task name
+          <input id="edit-title" type="text" required>
+        </label>
+        <label>
+          Project
+          <input id="edit-project" type="text">
+        </label>
+        <label>
+          Notes
+          <textarea id="edit-notes" rows="4"></textarea>
+        </label>
+        <div class="two-column">
+          <label>
+            Status
+            <select id="edit-status">
+              <option value="todo">To do</option>
+              <option value="active">In progress</option>
+              <option value="waiting">Waiting</option>
+              <option value="done">Done</option>
+            </select>
+          </label>
+          <label>
+            Priority
+            <select id="edit-priority">
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Due date
+          <input id="edit-due" type="datetime-local">
+        </label>
+        <label>
+          Reminder time
+          <input id="edit-reminder" type="datetime-local">
+        </label>
+
+        <div class="checklist-editor">
+          <div class="section-heading-row">
+            <h3>Checklist</h3>
+            <button class="ghost-button" id="add-checklist-item" type="button">Add item</button>
+          </div>
+          <div id="edit-checklist-list" class="edit-checklist-list"></div>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="danger-button" id="delete-task" type="button">Delete</button>
+          <div>
+            <button class="secondary-button" id="cancel-edit" type="button">Cancel</button>
+            <button class="primary-button" id="save-task" value="default" type="button">Save</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
