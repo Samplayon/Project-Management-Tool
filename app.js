@@ -33,6 +33,10 @@ const state = {
   },
 };
 
+const taskDragState = {
+  taskId: "",
+};
+
 const els = {
   taskForm: document.querySelector("#task-form"),
   taskTitle: document.querySelector("#task-title"),
@@ -135,6 +139,10 @@ function getDueState(value, isComplete = false) {
 
 function getTaskDueState(task) {
   return getDueState(task.dueAt, task.status === "done");
+}
+
+function getStatusById(statusId) {
+  return STATUSES.find((status) => status.id === statusId) || null;
 }
 
 function getChecklistItemDueState(item) {
@@ -471,12 +479,12 @@ function renderBoard() {
   els.board.innerHTML = STATUSES.map((status) => {
     const tasks = visible.filter((task) => task.status === status.id);
     return `
-      <section class="board-column" aria-label="${escapeAttr(status.label)} tasks">
+      <section class="board-column" aria-label="${escapeAttr(status.label)} tasks" data-status-id="${escapeAttr(status.id)}">
         <div class="column-header">
           <h2 class="column-title">${escapeHtml(status.label)}</h2>
           <span class="column-count">${tasks.length}</span>
         </div>
-        <div class="task-list">
+        <div class="task-list" data-status-id="${escapeAttr(status.id)}">
           ${tasks.length ? tasks.map(renderTaskCard).join("") : `<p class="empty-state">No tasks here.</p>`}
         </div>
       </section>
@@ -509,7 +517,7 @@ function renderTaskCard(task) {
   ` : "";
 
   return `
-    <button class="task-card ${task.status === "done" ? "done" : ""}" type="button" data-task-id="${escapeAttr(task.id)}">
+    <button class="task-card ${task.status === "done" ? "done" : ""}" type="button" draggable="true" data-task-id="${escapeAttr(task.id)}" data-status-id="${escapeAttr(task.status)}">
       <div class="task-card-meta">${projectPill}${priorityPill}</div>
       <h3 class="task-card-title">${escapeHtml(task.title)}</h3>
       ${notes}
@@ -957,12 +965,85 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => toast.remove(), 2800);
 }
 
+function getDropColumn(event) {
+  return event.target.closest(".board-column[data-status-id]");
+}
+
+function clearDragTargets() {
+  els.board.querySelectorAll(".board-column.drag-over").forEach((column) => {
+    column.classList.remove("drag-over");
+  });
+}
+
+function moveTaskToStatus(taskId, statusId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  const status = getStatusById(statusId);
+  if (!task || !status) return;
+
+  clearDragTargets();
+
+  if (task.status === status.id) return;
+
+  task.status = status.id;
+  task.updatedAt = nowMs();
+  persist();
+  render();
+  showToast(`Moved to ${status.label}`);
+}
+
 els.taskForm.addEventListener("submit", addTaskFromForm);
 els.timerForm.addEventListener("submit", startTimer);
 
 els.board.addEventListener("click", (event) => {
   const card = event.target.closest("[data-task-id]");
   if (card) openTask(card.dataset.taskId);
+});
+
+els.board.addEventListener("dragstart", (event) => {
+  const card = event.target.closest(".task-card[data-task-id]");
+  if (!card) return;
+
+  taskDragState.taskId = card.dataset.taskId;
+  card.classList.add("dragging");
+
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", taskDragState.taskId);
+  }
+});
+
+els.board.addEventListener("dragover", (event) => {
+  const column = getDropColumn(event);
+  if (!taskDragState.taskId || !column) return;
+
+  event.preventDefault();
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  clearDragTargets();
+  column.classList.add("drag-over");
+});
+
+els.board.addEventListener("dragleave", (event) => {
+  const column = getDropColumn(event);
+  if (!column || column.contains(event.relatedTarget)) return;
+  column.classList.remove("drag-over");
+});
+
+els.board.addEventListener("drop", (event) => {
+  const column = getDropColumn(event);
+  if (!column) return;
+
+  event.preventDefault();
+  const taskId = event.dataTransfer?.getData("text/plain") || taskDragState.taskId;
+  moveTaskToStatus(taskId, column.dataset.statusId);
+});
+
+els.board.addEventListener("dragend", (event) => {
+  event.target.closest(".task-card")?.classList.remove("dragging");
+  taskDragState.taskId = "";
+  clearDragTargets();
 });
 
 els.dueSoonList.addEventListener("click", (event) => {
