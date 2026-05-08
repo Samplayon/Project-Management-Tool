@@ -434,7 +434,7 @@ function addChecklistEditorItem() {
   row.dataset.checkId = uid("check");
   row.innerHTML = `
     <input type="checkbox" aria-label="Checklist item complete">
-    <input type="text" aria-label="Checklist item text" placeholder="New checklist item">
+    <input type="text" aria-label="Checklist item text">
     <button class="icon-button" type="button" aria-label="Remove checklist item">x</button>
   `;
   els.editChecklistList.append(row);
