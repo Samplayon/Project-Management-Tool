@@ -295,6 +295,9 @@ textarea:focus {
   grid-template-columns: repeat(4, minmax(220px, 1fr));
   gap: 10px;
   align-items: start;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
 .board-column {
@@ -555,7 +558,7 @@ textarea:focus {
   box-shadow: var(--shadow);
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1440px) {
   .workspace {
     grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
   }
@@ -565,7 +568,9 @@ textarea:focus {
     display: grid;
     grid-template-columns: 1fr 1fr;
   }
+}
 
+@media (max-width: 1180px) {
   .board {
     grid-template-columns: repeat(2, minmax(220px, 1fr));
   }
