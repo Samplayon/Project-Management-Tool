@@ -133,11 +133,53 @@ function getTaskDueState(task) {
   return "later";
 }
 
+function normalizeChecklistItem(item) {
+  return {
+    id: item?.id || uid("check"),
+    text: normalizeText(item?.text),
+    done: Boolean(item?.done),
+  };
+}
+
+function normalizeChecklistGroups(checklist) {
+  if (!Array.isArray(checklist)) return [];
+
+  const hasChecklistGroups = checklist.some((item) => Array.isArray(item?.items));
+  if (!hasChecklistGroups) {
+    const items = checklist.map(normalizeChecklistItem).filter((item) => item.text);
+    return items.length ? [{ id: uid("checklist"), title: "Checklist", items }] : [];
+  }
+
+  return checklist
+    .map((group, index) => {
+      const title = normalizeText(group?.title);
+      const items = Array.isArray(group?.items)
+        ? group.items.map(normalizeChecklistItem).filter((item) => item.text)
+        : [];
+
+      if (!title && !items.length) return null;
+
+      return {
+        id: group?.id || uid("checklist"),
+        title: title || `Checklist ${index + 1}`,
+        items,
+      };
+    })
+    .filter(Boolean);
+}
+
 function getChecklistProgress(task) {
-  const checklist = Array.isArray(task.checklist) ? task.checklist : [];
-  const total = checklist.length;
-  const done = checklist.filter((item) => item.done).length;
-  return { total, done, percent: total ? Math.round((done / total) * 100) : 0 };
+  const checklists = normalizeChecklistGroups(task.checklist);
+  const total = checklists.reduce((sum, checklist) => sum + checklist.items.length, 0);
+  const done = checklists.reduce((sum, checklist) => (
+    sum + checklist.items.filter((item) => item.done).length
+  ), 0);
+  return {
+    total,
+    done,
+    groups: checklists.length,
+    percent: total ? Math.round((done / total) * 100) : 0,
+  };
 }
 
 function normalizeRemoteState(remoteState) {
@@ -158,7 +200,7 @@ function normalizeTask(task) {
     priority: task.priority || "normal",
     dueAt: task.dueAt || "",
     reminderAt: task.reminderAt || "",
-    checklist: Array.isArray(task.checklist) ? task.checklist : [],
+    checklist: normalizeChecklistGroups(task.checklist),
     createdAt: Number(task.createdAt) || nowMs(),
     updatedAt: Number(task.updatedAt) || nowMs(),
     notified: task.notified && typeof task.notified === "object" ? task.notified : {},
@@ -321,8 +363,9 @@ function persist() {
 
 function matchesFilters(task) {
   const query = state.search.toLowerCase();
-  const checklist = Array.isArray(task.checklist) ? task.checklist : [];
-  const checklistText = checklist.map((item) => item.text).join(" ");
+  const checklistText = normalizeChecklistGroups(task.checklist)
+    .map((checklist) => `${checklist.title} ${checklist.items.map((item) => item.text).join(" ")}`)
+    .join(" ");
   const haystack = `${task.title} ${task.project} ${task.notes} ${checklistText}`.toLowerCase();
   const matchesSearch = !query || haystack.includes(query);
   const matchesProject = state.project === "all" || (task.project || "No project") === state.project;
@@ -433,14 +476,18 @@ function renderTaskCard(task) {
   const projectPill = `<span class="pill">${escapeHtml(task.project || "No project")}</span>`;
   const priorityPill = task.priority !== "normal" ? `<span class="pill ${escapeAttr(task.priority)}">${escapeHtml(capitalize(task.priority))}</span>` : "";
   const notes = task.notes ? `<p class="task-card-notes">${escapeHtml(truncate(task.notes, 120))}</p>` : "";
-  const checklist = progress.total ? `
+  const checklistLabel = progress.total
+    ? `${progress.done}/${progress.total} items`
+    : `${progress.groups} checklist${progress.groups === 1 ? "" : "s"}`;
+  const checklist = progress.groups ? `
     <div>
       <div class="checklist-preview">
-        <span class="pill">${progress.done}/${progress.total} checklist</span>
+        <span class="pill">${escapeHtml(checklistLabel)}</span>
+        ${progress.groups > 1 && progress.total ? `<span class="pill">${progress.groups} checklists</span>` : ""}
       </div>
-      <div class="progress-bar" aria-label="Checklist progress">
+      ${progress.total ? `<div class="progress-bar" aria-label="Checklist progress">
         <div class="progress-fill" style="width: ${progress.percent}%"></div>
-      </div>
+      </div>` : ""}
     </div>
   ` : "";
 
@@ -522,11 +569,14 @@ function renderNotificationButton() {
 
 function addTaskFromForm(event) {
   event.preventDefault();
-  const checklist = normalizeText(els.taskChecklist.value)
+  const checklistItems = normalizeText(els.taskChecklist.value)
     .split("\n")
     .map((text) => normalizeText(text))
     .filter(Boolean)
     .map((text) => ({ id: uid("check"), text, done: false }));
+  const checklist = checklistItems.length
+    ? [{ id: uid("checklist"), title: "Checklist", items: checklistItems }]
+    : [];
 
   state.tasks.unshift({
     id: uid("task"),
@@ -568,21 +618,65 @@ function openTask(taskId) {
 }
 
 function renderChecklistEditor(task) {
-  els.editChecklistList.innerHTML = task.checklist.length ? task.checklist.map((item) => `
+  const checklists = normalizeChecklistGroups(task.checklist);
+  els.editChecklistList.innerHTML = checklists.length
+    ? checklists.map(renderChecklistGroupEditor).join("")
+    : `<p class="empty-state">No checklists yet.</p>`;
+}
+
+function renderChecklistGroupEditor(checklist) {
+  const items = checklist.items.length
+    ? checklist.items.map(renderChecklistItemEditor).join("")
+    : `<p class="empty-state checklist-empty">No items yet.</p>`;
+
+  return `
+    <section class="checklist-group" data-checklist-id="${escapeAttr(checklist.id)}">
+      <div class="checklist-group-heading">
+        <label class="checklist-title-label">
+          <span>Checklist title</span>
+          <input class="checklist-title-input" type="text" value="${escapeAttr(checklist.title)}" aria-label="Checklist title">
+        </label>
+        <div class="checklist-group-actions">
+          <button class="ghost-button" type="button" data-checklist-action="add-item">Add item</button>
+          <button class="icon-button" type="button" data-checklist-action="remove-list" aria-label="Remove checklist">x</button>
+        </div>
+      </div>
+      <div class="checklist-items">
+        ${items}
+      </div>
+    </section>
+  `;
+}
+
+function renderChecklistItemEditor(item) {
+  return `
     <div class="checklist-row" data-check-id="${escapeAttr(item.id)}">
       <input type="checkbox" ${item.done ? "checked" : ""} aria-label="Checklist item complete">
       <input type="text" value="${escapeAttr(item.text)}" aria-label="Checklist item text">
-      <button class="icon-button" type="button" aria-label="Remove checklist item">x</button>
+      <button class="icon-button" type="button" data-checklist-action="remove-item" aria-label="Remove checklist item">x</button>
     </div>
-  `).join("") : `<p class="empty-state">No checklist items yet.</p>`;
+  `;
 }
 
 function collectChecklistEditor() {
-  return [...els.editChecklistList.querySelectorAll(".checklist-row")].map((row) => ({
-    id: row.dataset.checkId || uid("check"),
-    done: row.querySelector('input[type="checkbox"]').checked,
-    text: normalizeText(row.querySelector('input[type="text"]').value),
-  })).filter((item) => item.text);
+  return [...els.editChecklistList.querySelectorAll(".checklist-group")]
+    .map((group, index) => {
+      const title = normalizeText(group.querySelector(".checklist-title-input")?.value);
+      const items = [...group.querySelectorAll(".checklist-row")].map((row) => ({
+        id: row.dataset.checkId || uid("check"),
+        done: row.querySelector('input[type="checkbox"]').checked,
+        text: normalizeText(row.querySelector('input[type="text"]').value),
+      })).filter((item) => item.text);
+
+      if (!title && !items.length) return null;
+
+      return {
+        id: group.dataset.checklistId || uid("checklist"),
+        title: title || `Checklist ${index + 1}`,
+        items,
+      };
+    })
+    .filter(Boolean);
 }
 
 function saveEditedTask() {
@@ -620,21 +714,44 @@ function deleteEditedTask() {
   showToast("Task deleted");
 }
 
-function addChecklistEditorItem() {
-  if (els.editChecklistList.querySelector(".empty-state")) {
+function addChecklistEditorGroup() {
+  if (!els.editChecklistList.querySelector(".checklist-group")) {
     els.editChecklistList.innerHTML = "";
   }
 
-  const row = document.createElement("div");
-  row.className = "checklist-row";
-  row.dataset.checkId = uid("check");
-  row.innerHTML = `
-    <input type="checkbox" aria-label="Checklist item complete">
-    <input type="text" aria-label="Checklist item text">
-    <button class="icon-button" type="button" aria-label="Remove checklist item">x</button>
-  `;
-  els.editChecklistList.append(row);
+  const checklistCount = els.editChecklistList.querySelectorAll(".checklist-group").length;
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = renderChecklistGroupEditor({
+    id: uid("checklist"),
+    title: `Checklist ${checklistCount + 1}`,
+    items: [],
+  });
+  const group = wrapper.firstElementChild;
+  els.editChecklistList.append(group);
+  group.querySelector(".checklist-title-input").focus();
+  persistChecklistEditor();
+}
+
+function addChecklistItemToGroup(group) {
+  const list = group.querySelector(".checklist-items");
+  if (list.querySelector(".empty-state")) {
+    list.innerHTML = "";
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = renderChecklistItemEditor({ id: uid("check"), text: "", done: false });
+  const row = wrapper.firstElementChild;
+  list.append(row);
   row.querySelector('input[type="text"]').focus();
+}
+
+function persistChecklistEditor() {
+  const task = state.tasks.find((item) => item.id === els.editTaskId.value);
+  if (!task) return;
+  task.checklist = collectChecklistEditor();
+  task.updatedAt = nowMs();
+  persist();
+  render();
 }
 
 function startTimer(event) {
@@ -810,7 +927,7 @@ els.newTaskButton.addEventListener("click", () => {
 
 els.saveTask.addEventListener("click", saveEditedTask);
 els.deleteTask.addEventListener("click", deleteEditedTask);
-els.addChecklistItem.addEventListener("click", addChecklistEditorItem);
+els.addChecklistItem.addEventListener("click", addChecklistEditorGroup);
 els.closeDialog.addEventListener("click", () => els.dialog.close());
 els.cancelEdit.addEventListener("click", () => els.dialog.close());
 
@@ -820,22 +937,34 @@ els.editForm.addEventListener("submit", (event) => {
 });
 
 els.editChecklistList.addEventListener("click", (event) => {
-  const remove = event.target.closest("button");
-  if (!remove) return;
-  remove.closest(".checklist-row")?.remove();
-  if (!els.editChecklistList.querySelector(".checklist-row")) {
-    els.editChecklistList.innerHTML = `<p class="empty-state">No checklist items yet.</p>`;
+  const button = event.target.closest("[data-checklist-action]");
+  if (!button) return;
+
+  const action = button.dataset.checklistAction;
+  const group = button.closest(".checklist-group");
+
+  if (action === "add-item" && group) {
+    addChecklistItemToGroup(group);
   }
+
+  if (action === "remove-item" && group) {
+    button.closest(".checklist-row")?.remove();
+    if (!group.querySelector(".checklist-row")) {
+      group.querySelector(".checklist-items").innerHTML = `<p class="empty-state checklist-empty">No items yet.</p>`;
+    }
+  }
+
+  if (action === "remove-list") {
+    group?.remove();
+    if (!els.editChecklistList.querySelector(".checklist-group")) {
+      els.editChecklistList.innerHTML = `<p class="empty-state">No checklists yet.</p>`;
+    }
+  }
+
+  persistChecklistEditor();
 });
 
-els.editChecklistList.addEventListener("change", () => {
-  const task = state.tasks.find((item) => item.id === els.editTaskId.value);
-  if (!task) return;
-  task.checklist = collectChecklistEditor();
-  task.updatedAt = nowMs();
-  persist();
-  render();
-});
+els.editChecklistList.addEventListener("change", persistChecklistEditor);
 
 async function initialize() {
   render();

@@ -526,6 +526,38 @@ textarea:focus {
   gap: 8px;
 }
 
+.checklist-group {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 8px;
+}
+
+.checklist-group-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.checklist-title-label {
+  display: grid;
+  gap: 4px;
+}
+
+.checklist-group-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.checklist-items {
+  display: grid;
+  gap: 6px;
+}
+
 .checklist-row {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 40px;
@@ -542,6 +574,10 @@ textarea:focus {
 .checklist-row .icon-button {
   min-height: 36px;
   width: 36px;
+}
+
+.checklist-empty {
+  padding: 6px;
 }
 
 .toast {
@@ -584,7 +620,8 @@ textarea:focus {
   .board,
   .right-panel,
   .two-column,
-  .timer-row {
+  .timer-row,
+  .checklist-group-heading {
     grid-template-columns: 1fr;
   }
 
