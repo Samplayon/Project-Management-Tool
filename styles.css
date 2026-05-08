@@ -1,21 +1,23 @@
 :root {
   color-scheme: light;
-  --bg: #eef1f5;
-  --panel: #ffffff;
-  --panel-muted: #f7f8fa;
-  --ink: #17202a;
-  --muted: #687385;
-  --line: #d8dde6;
-  --accent: #126c62;
-  --accent-strong: #0c544c;
-  --accent-soft: #e1f2ee;
+  --bg: #cbd4d9;
+  --panel: #e1e7ea;
+  --panel-muted: #d2dde2;
+  --surface: #eef3f5;
+  --surface-strong: #f7fafb;
+  --ink: #14242d;
+  --muted: #586973;
+  --line: #aebcc3;
+  --accent: #0787a4;
+  --accent-strong: #056a82;
+  --accent-soft: #d4f3fa;
   --warning: #b35213;
   --warning-soft: #fff0df;
   --danger: #b42318;
   --danger-soft: #ffe8e5;
-  --done: #2c6f32;
-  --done-soft: #e4f3e3;
-  --shadow: 0 12px 35px rgba(34, 45, 57, 0.08);
+  --done: #21646b;
+  --done-soft: #d8eef1;
+  --shadow: 0 10px 24px rgba(28, 42, 50, 0.12);
 }
 
 * {
@@ -49,10 +51,10 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 22px 28px;
+  gap: 16px;
+  padding: 14px 18px;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(218, 227, 231, 0.94);
   backdrop-filter: blur(12px);
   position: sticky;
   top: 0;
@@ -66,7 +68,7 @@ button {
 }
 
 .topbar h1 {
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1.1;
 }
 
@@ -90,8 +92,8 @@ button {
 .workspace {
   display: grid;
   grid-template-columns: minmax(270px, 320px) minmax(0, 1fr) minmax(250px, 300px);
-  gap: 18px;
-  padding: 18px;
+  gap: 10px;
+  padding: 10px;
 }
 
 .left-panel,
@@ -104,7 +106,7 @@ button {
 .right-panel {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
 }
 
 .panel-section,
@@ -125,23 +127,23 @@ button {
 
 .panel-section {
   border-radius: 8px;
-  padding: 16px;
+  padding: 12px;
 }
 
 .panel-section h2 {
-  font-size: 17px;
+  font-size: 15px;
 }
 
 .task-form,
 .timer-form,
 .dialog-shell {
   display: grid;
-  gap: 13px;
+  gap: 9px;
 }
 
 label {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -153,9 +155,9 @@ textarea {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fff;
+  background: var(--surface-strong);
   color: var(--ink);
-  padding: 10px 11px;
+  padding: 8px 10px;
   outline: none;
 }
 
@@ -174,7 +176,7 @@ textarea:focus {
 .timer-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px;
 }
 
 .timer-row {
@@ -188,8 +190,8 @@ textarea:focus {
 .icon-button {
   border: 1px solid transparent;
   border-radius: 7px;
-  min-height: 40px;
-  padding: 9px 13px;
+  min-height: 36px;
+  padding: 7px 11px;
   font-weight: 800;
 }
 
@@ -203,14 +205,14 @@ textarea:focus {
 }
 
 .secondary-button {
-  background: var(--panel-muted);
+  background: #d8e2e6;
   border-color: var(--line);
   color: var(--ink);
 }
 
 .secondary-button:hover,
 .ghost-button:hover {
-  background: #edf3f3;
+  background: var(--accent-soft);
 }
 
 .ghost-button {
@@ -226,7 +228,7 @@ textarea:focus {
 .icon-button {
   width: 40px;
   padding: 0;
-  background: var(--panel-muted);
+  background: #d8e2e6;
   border-color: var(--line);
 }
 
@@ -236,15 +238,15 @@ textarea:focus {
 
 .main-panel {
   display: grid;
-  gap: 16px;
+  gap: 10px;
   align-content: start;
 }
 
 .toolbar {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(160px, 210px) minmax(160px, 210px);
-  gap: 12px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
   border-radius: 8px;
 }
 
@@ -257,13 +259,13 @@ textarea:focus {
 }
 
 .summary-item {
-  background: #fff;
-  padding: 14px;
+  background: var(--panel-muted);
+  padding: 10px;
 }
 
 .summary-value {
   display: block;
-  font-size: 26px;
+  font-size: 22px;
   font-weight: 900;
   line-height: 1;
 }
@@ -277,7 +279,7 @@ textarea:focus {
 .board {
   display: grid;
   grid-template-columns: repeat(4, minmax(220px, 1fr));
-  gap: 14px;
+  gap: 10px;
   align-items: start;
 }
 
@@ -290,8 +292,8 @@ textarea:focus {
 .column-header {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
-  padding: 13px 14px;
+  gap: 8px;
+  padding: 9px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--panel-muted);
 }
@@ -311,28 +313,28 @@ textarea:focus {
 
 .task-list {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 8px;
 }
 
 .task-card {
   display: grid;
-  gap: 10px;
+  gap: 7px;
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
-  padding: 12px;
+  background: var(--surface);
+  padding: 9px;
   text-align: left;
 }
 
 .task-card:hover {
-  border-color: #a9bbb7;
-  box-shadow: 0 10px 24px rgba(34, 45, 57, 0.1);
+  border-color: var(--accent);
+  box-shadow: 0 8px 18px rgba(28, 42, 50, 0.14);
 }
 
 .task-card.done {
-  background: #fbfdfb;
+  background: var(--done-soft);
 }
 
 .task-card-title {
@@ -349,7 +351,7 @@ textarea:focus {
 .due-item {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -378,8 +380,8 @@ textarea:focus {
 }
 
 .pill.low {
-  background: #eef3ff;
-  color: #34548a;
+  background: #d9e5e9;
+  color: #435863;
 }
 
 .pill.due,
@@ -399,9 +401,9 @@ textarea:focus {
 }
 
 .progress-bar {
-  height: 7px;
+  height: 6px;
   border-radius: 999px;
-  background: #e8ecf1;
+  background: #c6d1d7;
   overflow: hidden;
 }
 
@@ -412,7 +414,7 @@ textarea:focus {
 
 .empty-state {
   margin: 0;
-  padding: 20px 10px;
+  padding: 12px 8px;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.4;
@@ -424,13 +426,13 @@ textarea:focus {
 .due-soon-list,
 .edit-checklist-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .timer-list,
 .alert-list,
 .due-soon-list {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .timer-card,
@@ -439,8 +441,8 @@ textarea:focus {
   justify-content: space-between;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
-  padding: 10px;
+  background: var(--surface);
+  padding: 8px;
 }
 
 .timer-card strong,
@@ -480,36 +482,37 @@ textarea:focus {
 }
 
 .dialog-shell {
-  padding: 18px;
+  padding: 12px;
+  background: var(--panel);
 }
 
 .dialog-header,
 .dialog-actions {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
   align-items: center;
 }
 
 .dialog-header {
   border-bottom: 1px solid var(--line);
-  padding-bottom: 12px;
+  padding-bottom: 9px;
 }
 
 .dialog-actions {
   border-top: 1px solid var(--line);
-  padding-top: 12px;
+  padding-top: 9px;
 }
 
 .checklist-editor {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .checklist-row {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) 40px;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -532,9 +535,9 @@ textarea:focus {
   z-index: 10;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #101820;
+  background: #102f3a;
   color: #fff;
-  padding: 12px 16px;
+  padding: 10px 14px;
   box-shadow: var(--shadow);
 }
 
@@ -576,7 +579,7 @@ textarea:focus {
   }
 
   .workspace {
-    padding: 12px;
+    padding: 8px;
   }
 
   .topbar-actions .primary-button,
