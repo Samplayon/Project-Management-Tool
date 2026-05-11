@@ -494,12 +494,12 @@ async function loadRemoteState() {
 
       if (!state.sync.error) {
         clearLegacyLocalState();
-        showToast("Moved local browser data to Google Drive");
+        showToast("Moved local browser data to the local CSV file");
       }
     }
   } catch (error) {
     state.sync.error = error.message;
-    showToast(`Drive sync failed: ${error.message}`);
+    showToast(`Local data load failed: ${error.message}`);
   } finally {
     state.sync.ready = true;
     renderSyncStatus();
@@ -527,7 +527,7 @@ function persist() {
     })
     .catch((error) => {
       state.sync.error = error.message;
-      showToast(`Drive save failed: ${error.message}`);
+      showToast(`Local data save failed: ${error.message}`);
     })
     .finally(() => {
       pendingSaveCount = Math.max(0, pendingSaveCount - 1);
@@ -598,13 +598,13 @@ function renderSyncStatus() {
   els.syncStatus.classList.toggle("saving", state.sync.saving);
 
   if (state.sync.error) {
-    els.syncStatus.textContent = `Google Drive sync unavailable: ${state.sync.error}`;
+    els.syncStatus.textContent = `Local project data unavailable: ${state.sync.error}`;
   } else if (state.sync.saving) {
-    els.syncStatus.textContent = "Saving to Google Drive...";
+    els.syncStatus.textContent = "Saving to local file...";
   } else if (state.sync.ready) {
-    els.syncStatus.textContent = "Synced with Google Drive";
+    els.syncStatus.textContent = "Saved to local file";
   } else {
-    els.syncStatus.textContent = "Connecting to Google Drive...";
+    els.syncStatus.textContent = "Loading local project data...";
   }
 }
 

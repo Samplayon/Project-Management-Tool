@@ -1,5 +1,9 @@
-const APPS_SCRIPT_URL = process.env.PROJECT_DESK_APPS_SCRIPT_URL;
-const SYNC_SECRET = process.env.PROJECT_DESK_SYNC_SECRET;
+const fs = require("fs/promises");
+const path = require("path");
+
+const DATA_FILE_PATH = path.join(process.cwd(), "data", "project-data.csv");
+const CSV_COLUMNS = ["collection", "id", "payload_json"];
+const COLLECTION_KEYS = ["tasks", "alerts", "timers", "statuses", "todoLists"];
 
 const EMPTY_STATE = {
   tasks: [],
@@ -38,51 +42,152 @@ async function readRequestBody(req) {
   return rawBody ? JSON.parse(rawBody) : {};
 }
 
-async function callAppsScript(payload) {
-  if (!APPS_SCRIPT_URL || !SYNC_SECRET) {
-    throw new Error("Missing PROJECT_DESK_APPS_SCRIPT_URL or PROJECT_DESK_SYNC_SECRET in Vercel environment variables.");
+function escapeCsvCell(value) {
+  const text = String(value ?? "");
+  if (!/[",\r\n]/.test(text)) return text;
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function serializeCsvRow(row) {
+  return row.map(escapeCsvCell).join(",");
+}
+
+function parseCsvRows(csvText) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < csvText.length; index += 1) {
+    const char = csvText[index];
+    const nextChar = csvText[index + 1];
+
+    if (inQuotes) {
+      if (char === '"' && nextChar === '"') {
+        cell += '"';
+        index += 1;
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        cell += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+      continue;
+    }
+
+    if (char === ",") {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if (char === "\n") {
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    if (char !== "\r") {
+      cell += char;
+    }
   }
 
-  const response = await fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "text/plain;charset=utf-8",
-    },
-    body: JSON.stringify({
-      ...payload,
-      secret: SYNC_SECRET,
-    }),
+  if (cell || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+async function readLocalCsvState() {
+  let csvText = "";
+
+  try {
+    csvText = await fs.readFile(DATA_FILE_PATH, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return normalizeState(EMPTY_STATE);
+    throw error;
+  }
+
+  const rows = parseCsvRows(csvText);
+  if (rows.length < 2) return normalizeState(EMPTY_STATE);
+
+  const header = rows[0];
+  const collectionIndex = header.indexOf("collection");
+  const idIndex = header.indexOf("id");
+  const payloadIndex = header.indexOf("payload_json");
+  const state = normalizeState(EMPTY_STATE);
+
+  rows.slice(1).forEach((row) => {
+    const collection = row[collectionIndex];
+    const payloadJson = row[payloadIndex];
+    if (!COLLECTION_KEYS.includes(collection) || !payloadJson) return;
+
+    try {
+      const record = JSON.parse(payloadJson);
+      if (record && typeof record === "object") {
+        state[collection].push({
+          ...record,
+          id: record.id || row[idIndex] || "",
+        });
+      }
+    } catch (error) {
+      // Skip malformed rows so one bad CSV entry does not block the whole app.
+    }
   });
-  const body = await response.json().catch(() => ({}));
 
-  if (!response.ok || body.ok === false) {
-    throw new Error(body.error || `Apps Script returned status ${response.status}`);
-  }
+  return normalizeState(state);
+}
 
-  return body;
+async function writeLocalCsvState(state) {
+  const normalized = normalizeState(state);
+  const rows = [CSV_COLUMNS];
+
+  COLLECTION_KEYS.forEach((collection) => {
+    normalized[collection].forEach((record) => {
+      rows.push([
+        collection,
+        record?.id || "",
+        JSON.stringify(record || {}),
+      ]);
+    });
+  });
+
+  const csvText = `${rows.map(serializeCsvRow).join("\n")}\n`;
+  const dataDirectory = path.dirname(DATA_FILE_PATH);
+  const temporaryPath = `${DATA_FILE_PATH}.tmp`;
+
+  await fs.mkdir(dataDirectory, { recursive: true });
+  await fs.writeFile(temporaryPath, csvText, "utf8");
+  await fs.rename(temporaryPath, DATA_FILE_PATH);
+
+  return normalized;
 }
 
 module.exports = async function handler(req, res) {
   try {
     if (req.method === "GET") {
-      const response = await callAppsScript({ action: "load" });
-      sendJson(res, 200, { ok: true, state: normalizeState(response.state || EMPTY_STATE) });
+      const state = await readLocalCsvState();
+      sendJson(res, 200, { ok: true, state });
       return;
     }
 
     if (req.method === "POST") {
       const body = await readRequestBody(req);
-      const response = await callAppsScript({
-        action: "save",
-        state: normalizeState(body.state || EMPTY_STATE),
-      });
-      sendJson(res, 200, { ok: true, state: normalizeState(response.state || body.state || EMPTY_STATE) });
+      const state = await writeLocalCsvState(body.state || EMPTY_STATE);
+      sendJson(res, 200, { ok: true, state });
       return;
     }
 
     sendJson(res, 405, { ok: false, error: "Method not allowed" });
   } catch (error) {
-    sendJson(res, 500, { ok: false, error: error.message || "Unable to sync Project Desk data" });
+    sendJson(res, 500, { ok: false, error: error.message || "Unable to save Project Desk data locally" });
   }
 };
