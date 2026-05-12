@@ -9,7 +9,7 @@ import os
 ROOT = Path(__file__).resolve().parent
 DATA_FILE_PATH = ROOT / "data" / "project-data.csv"
 CSV_COLUMNS = ["collection", "id", "payload_json"]
-COLLECTION_KEYS = ["tasks", "alerts", "timers", "statuses", "todoLists", "oneOnOnes"]
+COLLECTION_KEYS = ["tasks", "alerts", "timers", "statuses", "todoLists", "oneOnOnes", "stickyNotes"]
 EMPTY_STATE = {
     "tasks": [],
     "alerts": [],
@@ -17,6 +17,7 @@ EMPTY_STATE = {
     "statuses": [],
     "todoLists": [],
     "oneOnOnes": [],
+    "stickyNotes": [],
 }
 CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
@@ -72,6 +73,7 @@ def normalize_state(state):
         "statuses": dedupe_statuses(source.get("statuses") if isinstance(source.get("statuses"), list) else []),
         "todoLists": dedupe_records(source.get("todoLists") if isinstance(source.get("todoLists"), list) else []),
         "oneOnOnes": dedupe_records(source.get("oneOnOnes") if isinstance(source.get("oneOnOnes"), list) else []),
+        "stickyNotes": dedupe_records(source.get("stickyNotes") if isinstance(source.get("stickyNotes"), list) else []),
     }
 
 

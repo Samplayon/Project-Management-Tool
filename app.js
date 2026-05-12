@@ -1,6 +1,8 @@
 const SYNC_API_URL = "/api/project-data";
 const HOME_TODO_ID = "home-todo";
 const DEFAULT_HOME_TODO_TITLE = "To-do list";
+const STICKY_NOTE_ID = "main-sticky-note";
+const DEFAULT_STICKY_NOTE_TITLE = "Sticky Note";
 
 const DEFAULT_STATUSES = [
   { id: "todo", label: "To do" },
@@ -38,6 +40,7 @@ const EMPTY_REMOTE_STATE = {
   statuses: DEFAULT_STATUSES,
   todoLists: [createDefaultHomeTodo()],
   oneOnOnes: createDefaultOneOnOnes(),
+  stickyNotes: [createDefaultStickyNote()],
 };
 
 const state = {
@@ -47,6 +50,7 @@ const state = {
   statuses: createDefaultStatuses(),
   todoLists: [createDefaultHomeTodo()],
   oneOnOnes: createDefaultOneOnOnes(),
+  stickyNotes: [createDefaultStickyNote()],
   search: "",
   project: "all",
   due: "all",
@@ -86,6 +90,7 @@ const els = {
   clearAlerts: document.querySelector("#clear-alerts"),
   dueSoonList: document.querySelector("#due-soon-list"),
   oneOnOneList: document.querySelector("#one-on-one-list"),
+  stickyNoteText: document.querySelector("#sticky-note-text"),
   notificationPermission: document.querySelector("#notification-permission"),
   newTaskButton: document.querySelector("#new-task-button"),
   dialog: document.querySelector("#task-dialog"),
@@ -156,6 +161,16 @@ function createDefaultHomeTodo() {
     mode: "notes",
     notes: "",
     items: [],
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
+
+function createDefaultStickyNote() {
+  return {
+    id: STICKY_NOTE_ID,
+    title: DEFAULT_STICKY_NOTE_TITLE,
+    text: "",
     createdAt: 0,
     updatedAt: 0,
   };
@@ -261,6 +276,14 @@ function getHomeTodoList() {
   }
 
   return state.todoLists[0];
+}
+
+function getStickyNote() {
+  if (!state.stickyNotes.length) {
+    state.stickyNotes = [createDefaultStickyNote()];
+  }
+
+  return state.stickyNotes[0];
 }
 
 function getTodoListById(todoListId) {
@@ -553,6 +576,7 @@ function normalizeRemoteState(remoteState) {
     statuses: normalizeStatuses(dedupeRecordsById(remoteState?.statuses || []), tasks),
     todoLists: dedupeRecordsById(normalizeTodoLists(remoteState?.todoLists || remoteState?.todoList)),
     oneOnOnes: normalizeOneOnOnes(remoteState?.oneOnOnes),
+    stickyNotes: normalizeStickyNotes(remoteState?.stickyNotes || remoteState?.stickyNote),
   };
 }
 
@@ -617,6 +641,25 @@ function normalizeTodoList(todoList) {
     items: Array.isArray(todoList.items) ? todoList.items.map(normalizeTodoItem) : [],
     createdAt,
     updatedAt: Number(todoList.updatedAt) || createdAt,
+  };
+}
+
+function normalizeStickyNotes(stickyNotes) {
+  const source = Array.isArray(stickyNotes) ? stickyNotes : stickyNotes ? [stickyNotes] : [];
+  const normalized = source.map(normalizeStickyNote).filter(Boolean);
+  return normalized.length ? normalized : [createDefaultStickyNote()];
+}
+
+function normalizeStickyNote(stickyNote) {
+  if (!stickyNote || typeof stickyNote !== "object") return null;
+  const createdAt = Number(stickyNote.createdAt) || nowMs();
+
+  return {
+    id: normalizeText(stickyNote.id) || STICKY_NOTE_ID,
+    title: normalizeText(stickyNote.title) || DEFAULT_STICKY_NOTE_TITLE,
+    text: typeof stickyNote.text === "string" ? stickyNote.text : "",
+    createdAt,
+    updatedAt: Number(stickyNote.updatedAt) || createdAt,
   };
 }
 
@@ -700,6 +743,7 @@ function getPersistableState() {
     statuses: state.statuses,
     todoLists: state.todoLists,
     oneOnOnes: state.oneOnOnes,
+    stickyNotes: state.stickyNotes,
   };
 }
 
@@ -710,6 +754,7 @@ function applySavedState(savedState) {
   state.statuses = savedState.statuses;
   state.todoLists = savedState.todoLists;
   state.oneOnOnes = savedState.oneOnOnes;
+  state.stickyNotes = savedState.stickyNotes;
 }
 
 async function requestJson(url, options = {}) {
@@ -753,6 +798,7 @@ let saveQueue = Promise.resolve();
 let saveVersion = 0;
 let homeTodoSaveTimer = null;
 let oneOnOneSaveTimer = null;
+let stickyNoteSaveTimer = null;
 
 function persist() {
   const snapshot = getPersistableState();
@@ -805,6 +851,14 @@ function scheduleOneOnOnePersist() {
   }, 450);
 }
 
+function scheduleStickyNotePersist() {
+  window.clearTimeout(stickyNoteSaveTimer);
+  stickyNoteSaveTimer = window.setTimeout(() => {
+    stickyNoteSaveTimer = null;
+    persist();
+  }, 450);
+}
+
 function matchesFilters(task) {
   const query = state.search.toLowerCase();
   const checklistText = normalizeChecklistGroups(task.checklist)
@@ -850,6 +904,7 @@ function render() {
   renderAlerts();
   renderDueSoon();
   renderOneOnOnes();
+  renderStickyNote();
   renderNotificationButton();
   renderSyncStatus();
 }
@@ -1186,6 +1241,15 @@ function renderOneOnOnes() {
   if (!els.oneOnOneList) return;
 
   els.oneOnOneList.innerHTML = state.oneOnOnes.map(renderOneOnOneCard).join("");
+}
+
+function renderStickyNote() {
+  if (!els.stickyNoteText) return;
+  const stickyNote = getStickyNote();
+
+  if (document.activeElement !== els.stickyNoteText) {
+    els.stickyNoteText.value = stickyNote.text;
+  }
 }
 
 function renderOneOnOneCard(person) {
@@ -1879,6 +1943,24 @@ function updateHomeTodo(updates, shouldRender = false, saveImmediately = false) 
   }
 }
 
+function updateStickyNote(updates, saveImmediately = false) {
+  const stickyNote = getStickyNote();
+  const currentTime = nowMs();
+
+  Object.assign(stickyNote, updates, {
+    createdAt: stickyNote.createdAt || currentTime,
+    updatedAt: currentTime,
+  });
+
+  if (saveImmediately) {
+    window.clearTimeout(stickyNoteSaveTimer);
+    stickyNoteSaveTimer = null;
+    persist();
+  } else {
+    scheduleStickyNotePersist();
+  }
+}
+
 function updateHomeTodoItem(itemId, updates, shouldRender = false, saveImmediately = false) {
   const todoList = getHomeTodoList();
   const items = todoList.items.map((item) => (
@@ -2174,6 +2256,12 @@ els.oneOnOneList.addEventListener("input", (event) => {
   if (!event.target.classList.contains("one-on-one-note-text")) return;
   updateOneOnOneNote(event.target.closest("[data-one-on-one-id]"), event.target);
 });
+
+if (els.stickyNoteText) {
+  els.stickyNoteText.addEventListener("input", (event) => {
+    updateStickyNote({ text: event.target.value });
+  });
+}
 
 els.searchInput.addEventListener("input", (event) => {
   state.search = event.target.value;

@@ -1024,6 +1024,35 @@ textarea:focus {
   width: 36px;
 }
 
+.sticky-note-section {
+  display: grid;
+  gap: 8px;
+  background: #f2dc78;
+  border-color: #bda651;
+}
+
+.sticky-note-section h2 {
+  color: #332b08;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.sticky-note-text {
+  min-height: 180px;
+  border-color: #bda651;
+  background: #fff3a8;
+  color: #332b08;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.22;
+  resize: vertical;
+}
+
+.sticky-note-text:focus {
+  border-color: #8d761e;
+  box-shadow: 0 0 0 3px rgba(141, 118, 30, 0.18);
+}
+
 .alert-item,
 .due-item {
   justify-content: space-between;
