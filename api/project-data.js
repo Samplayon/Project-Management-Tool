@@ -15,12 +15,46 @@ const EMPTY_STATE = {
 
 function normalizeState(state) {
   return {
-    tasks: Array.isArray(state?.tasks) ? state.tasks : [],
-    alerts: Array.isArray(state?.alerts) ? state.alerts : [],
-    timers: Array.isArray(state?.timers) ? state.timers : [],
-    statuses: Array.isArray(state?.statuses) ? state.statuses : [],
-    todoLists: Array.isArray(state?.todoLists) ? state.todoLists : [],
+    tasks: dedupeRecordsById(Array.isArray(state?.tasks) ? state.tasks : []),
+    alerts: dedupeRecordsById(Array.isArray(state?.alerts) ? state.alerts : []),
+    timers: dedupeRecordsById(Array.isArray(state?.timers) ? state.timers : []),
+    statuses: dedupeStatuses(Array.isArray(state?.statuses) ? state.statuses : []),
+    todoLists: dedupeRecordsById(Array.isArray(state?.todoLists) ? state.todoLists : []),
   };
+}
+
+function getRecordTimestamp(record) {
+  return Number(record?.updatedAt || record?.createdAt || record?.completedAt || record?.endsAt || 0);
+}
+
+function dedupeRecordsById(records) {
+  const recordsById = new Map();
+
+  records.forEach((record) => {
+    const id = String(record?.id || "").trim();
+    if (!id) return;
+
+    const current = recordsById.get(id);
+    if (!current || getRecordTimestamp(record) >= getRecordTimestamp(current)) {
+      recordsById.set(id, record);
+    }
+  });
+
+  return [...recordsById.values()];
+}
+
+function dedupeStatuses(statuses) {
+  const statusesByLabel = new Map();
+
+  statuses.forEach((status) => {
+    const id = String(status?.id || "").trim();
+    const label = String(status?.label || "").trim();
+    const key = (label || id).toLowerCase();
+    if (!key || statusesByLabel.has(key)) return;
+    statusesByLabel.set(key, status);
+  });
+
+  return [...statusesByLabel.values()];
 }
 
 function sendJson(res, statusCode, body) {

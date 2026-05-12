@@ -21,76 +21,6 @@
       </header>
 
       <main class="workspace">
-        <aside class="left-panel" aria-label="Task tools">
-          <section class="panel-section">
-            <h2>New task</h2>
-            <form id="task-form" class="task-form">
-              <label>
-                Task name
-                <input id="task-title" name="title" type="text" autocomplete="off" required>
-              </label>
-              <label>
-                Project
-                <input id="task-project" name="project" type="text" autocomplete="off">
-              </label>
-              <label>
-                Notes
-                <textarea id="task-notes" name="notes" rows="4"></textarea>
-              </label>
-              <div class="two-column">
-                <label>
-                  Status
-                  <select id="task-status" name="status">
-                    <option value="todo">To do</option>
-                    <option value="active">In progress</option>
-                    <option value="waiting">Waiting</option>
-                    <option value="done">Done</option>
-                  </select>
-                </label>
-                <label>
-                  Priority
-                  <select id="task-priority" name="priority">
-                    <option value="normal">Normal</option>
-                    <option value="high">High</option>
-                    <option value="low">Low</option>
-                  </select>
-                </label>
-              </div>
-              <label>
-                Due date
-                <input id="task-due" name="due" type="datetime-local">
-              </label>
-              <label>
-                Reminder time
-                <input id="task-reminder" name="reminder" type="datetime-local">
-              </label>
-              <label>
-                Initial checklist items
-                <textarea id="task-checklist" name="checklist" rows="4"></textarea>
-              </label>
-              <button class="primary-button full-width" type="submit">Add task</button>
-            </form>
-          </section>
-
-          <section class="panel-section">
-            <h2>Focus timer</h2>
-            <form id="timer-form" class="timer-form">
-              <label>
-                Timer label
-                <input id="timer-label" type="text" autocomplete="off">
-              </label>
-              <div class="timer-row">
-                <label>
-                  Minutes
-                  <input id="timer-minutes" type="number" min="1" max="240">
-                </label>
-                <button class="secondary-button" type="submit">Start</button>
-              </div>
-            </form>
-            <div id="timer-list" class="timer-list" aria-live="polite"></div>
-          </section>
-        </aside>
-
         <section class="main-panel">
           <section class="home-todo-window" aria-label="Home to-do list">
             <div class="home-todo-header">
@@ -159,7 +89,7 @@
       <form class="dialog-shell" id="edit-task-form">
         <div class="dialog-header">
           <div>
-            <p class="eyebrow">Edit task</p>
+            <p class="eyebrow" id="dialog-mode">Edit task</p>
             <h2 id="dialog-title">Task</h2>
           </div>
           <button class="icon-button" id="close-dialog" aria-label="Close dialog" type="button">x</button>
@@ -224,6 +154,6 @@
       </form>
     </dialog>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=csv-source-20260512"></script>
   </body>
 </html>

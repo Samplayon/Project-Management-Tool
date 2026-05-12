@@ -17,12 +17,6 @@ const EMPTY_REMOTE_STATE = {
   todoLists: [createDefaultHomeTodo()],
 };
 
-const LEGACY_LOCAL_STORAGE_KEYS = {
-  tasks: "project-desk-tasks-v1",
-  alerts: "project-desk-alerts-v1",
-  timers: "project-desk-timers-v1",
-};
-
 const state = {
   tasks: [],
   alerts: [],
@@ -44,19 +38,6 @@ const taskDragState = {
 };
 
 const els = {
-  taskForm: document.querySelector("#task-form"),
-  taskTitle: document.querySelector("#task-title"),
-  taskProject: document.querySelector("#task-project"),
-  taskNotes: document.querySelector("#task-notes"),
-  taskStatus: document.querySelector("#task-status"),
-  taskPriority: document.querySelector("#task-priority"),
-  taskDue: document.querySelector("#task-due"),
-  taskReminder: document.querySelector("#task-reminder"),
-  taskChecklist: document.querySelector("#task-checklist"),
-  timerForm: document.querySelector("#timer-form"),
-  timerLabel: document.querySelector("#timer-label"),
-  timerMinutes: document.querySelector("#timer-minutes"),
-  timerList: document.querySelector("#timer-list"),
   board: document.querySelector("#board"),
   summary: document.querySelector("#summary-strip"),
   searchInput: document.querySelector("#search-input"),
@@ -76,6 +57,7 @@ const els = {
   newTaskButton: document.querySelector("#new-task-button"),
   dialog: document.querySelector("#task-dialog"),
   editForm: document.querySelector("#edit-task-form"),
+  dialogMode: document.querySelector("#dialog-mode"),
   dialogTitle: document.querySelector("#dialog-title"),
   editTaskId: document.querySelector("#edit-task-id"),
   editTitle: document.querySelector("#edit-title"),
@@ -151,9 +133,13 @@ function normalizeStatuses(statuses, tasks = []) {
   const source = Array.isArray(statuses) && statuses.length ? statuses : createDefaultStatuses();
   const normalized = [];
   const seenIds = new Set();
+  const seenLabels = new Set();
 
   source.forEach((status, index) => {
     const label = normalizeText(status?.label) || `List ${index + 1}`;
+    const labelKey = label.toLowerCase();
+    if (seenLabels.has(labelKey)) return;
+
     const base = normalizeText(status?.id) || toStatusIdBase(label);
     let id = base;
     let suffix = 2;
@@ -165,6 +151,7 @@ function normalizeStatuses(statuses, tasks = []) {
 
     normalized.push({ id, label });
     seenIds.add(id);
+    seenLabels.add(labelKey);
   });
 
   tasks.forEach((task) => {
@@ -303,15 +290,35 @@ function getChecklistProgress(task) {
   };
 }
 
+function getRecordTimestamp(record) {
+  return Number(record?.updatedAt || record?.createdAt || record?.completedAt || record?.endsAt || 0);
+}
+
+function dedupeRecordsById(records) {
+  const recordsById = new Map();
+
+  records.forEach((record) => {
+    const id = normalizeText(record?.id);
+    if (!id) return;
+
+    const current = recordsById.get(id);
+    if (!current || getRecordTimestamp(record) >= getRecordTimestamp(current)) {
+      recordsById.set(id, record);
+    }
+  });
+
+  return [...recordsById.values()];
+}
+
 function normalizeRemoteState(remoteState) {
-  const tasks = Array.isArray(remoteState?.tasks) ? remoteState.tasks.map(normalizeTask) : [];
+  const tasks = dedupeRecordsById(Array.isArray(remoteState?.tasks) ? remoteState.tasks.map(normalizeTask) : []);
 
   return {
     tasks,
-    alerts: Array.isArray(remoteState?.alerts) ? remoteState.alerts.map(normalizeAlert) : [],
-    timers: Array.isArray(remoteState?.timers) ? remoteState.timers.map(normalizeTimer) : [],
-    statuses: normalizeStatuses(remoteState?.statuses, tasks),
-    todoLists: normalizeTodoLists(remoteState?.todoLists || remoteState?.todoList),
+    alerts: dedupeRecordsById(Array.isArray(remoteState?.alerts) ? remoteState.alerts.map(normalizeAlert) : []),
+    timers: dedupeRecordsById(Array.isArray(remoteState?.timers) ? remoteState.timers.map(normalizeTimer) : []),
+    statuses: normalizeStatuses(dedupeRecordsById(remoteState?.statuses || []), tasks),
+    todoLists: dedupeRecordsById(normalizeTodoLists(remoteState?.todoLists || remoteState?.todoList)),
   };
 }
 
@@ -380,66 +387,6 @@ function normalizeTodoItem(item) {
   };
 }
 
-function hasTodoListContent(todoList) {
-  return Boolean(
-    normalizeText(todoList?.notes)
-    || normalizeText(todoList?.title) !== DEFAULT_HOME_TODO_TITLE
-    || todoList?.items?.some((item) => normalizeText(item.text) || item.done)
-  );
-}
-
-function getStateItemCount(savedState) {
-  return savedState.tasks.length
-    + savedState.alerts.length
-    + savedState.timers.length
-    + savedState.todoLists.filter(hasTodoListContent).length;
-}
-
-function mergeRecordsById(primaryRecords, secondaryRecords, timestampKey) {
-  const recordsById = new Map(primaryRecords.map((record) => [record.id, record]));
-
-  secondaryRecords.forEach((record) => {
-    const current = recordsById.get(record.id);
-    const currentTime = Number(current?.[timestampKey] || current?.createdAt || 0);
-    const nextTime = Number(record?.[timestampKey] || record?.createdAt || 0);
-
-    if (!current || nextTime >= currentTime) {
-      recordsById.set(record.id, record);
-    }
-  });
-
-  return [...recordsById.values()];
-}
-
-function mergeSavedStates(remoteState, legacyState) {
-  const tasks = mergeRecordsById(remoteState.tasks, legacyState.tasks, "updatedAt");
-  const todoLists = remoteState.todoLists.some(hasTodoListContent) ? remoteState.todoLists : legacyState.todoLists;
-
-  return {
-    tasks,
-    alerts: mergeRecordsById(remoteState.alerts, legacyState.alerts, "createdAt"),
-    timers: mergeRecordsById(remoteState.timers, legacyState.timers, "createdAt"),
-    statuses: normalizeStatuses(remoteState.statuses, tasks),
-    todoLists,
-  };
-}
-
-function loadLegacyLocalState() {
-  try {
-    return normalizeRemoteState({
-      tasks: JSON.parse(localStorage.getItem(LEGACY_LOCAL_STORAGE_KEYS.tasks) || "[]"),
-      alerts: JSON.parse(localStorage.getItem(LEGACY_LOCAL_STORAGE_KEYS.alerts) || "[]"),
-      timers: JSON.parse(localStorage.getItem(LEGACY_LOCAL_STORAGE_KEYS.timers) || "[]"),
-    });
-  } catch (error) {
-    return normalizeRemoteState(EMPTY_REMOTE_STATE);
-  }
-}
-
-function clearLegacyLocalState() {
-  Object.values(LEGACY_LOCAL_STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
-}
-
 function getPersistableState() {
   return {
     tasks: state.tasks,
@@ -448,6 +395,14 @@ function getPersistableState() {
     statuses: state.statuses,
     todoLists: state.todoLists,
   };
+}
+
+function applySavedState(savedState) {
+  state.tasks = savedState.tasks;
+  state.alerts = savedState.alerts;
+  state.timers = savedState.timers;
+  state.statuses = savedState.statuses;
+  state.todoLists = savedState.todoLists;
 }
 
 async function requestJson(url, options = {}) {
@@ -476,30 +431,10 @@ async function loadRemoteState() {
   try {
     const response = await requestJson(SYNC_API_URL);
     const remoteState = normalizeRemoteState(response.state || EMPTY_REMOTE_STATE);
-    state.tasks = remoteState.tasks;
-    state.alerts = remoteState.alerts;
-    state.timers = remoteState.timers;
-    state.statuses = remoteState.statuses;
-    state.todoLists = remoteState.todoLists;
-
-    const legacyState = loadLegacyLocalState();
-    if (getStateItemCount(legacyState) > 0) {
-      const mergedState = mergeSavedStates(remoteState, legacyState);
-      state.tasks = mergedState.tasks;
-      state.alerts = mergedState.alerts;
-      state.timers = mergedState.timers;
-      state.statuses = mergedState.statuses;
-      state.todoLists = mergedState.todoLists;
-      await persist();
-
-      if (!state.sync.error) {
-        clearLegacyLocalState();
-        showToast("Moved local browser data to the local CSV file");
-      }
-    }
+    applySavedState(remoteState);
   } catch (error) {
     state.sync.error = error.message;
-    showToast(`Local data load failed: ${error.message}`);
+    showToast(`CSV load failed: ${error.message}`);
   } finally {
     state.sync.ready = true;
     renderSyncStatus();
@@ -508,10 +443,13 @@ async function loadRemoteState() {
 
 let pendingSaveCount = 0;
 let saveQueue = Promise.resolve();
+let saveVersion = 0;
 let homeTodoSaveTimer = null;
 
 function persist() {
   const snapshot = getPersistableState();
+  const currentSaveVersion = saveVersion + 1;
+  saveVersion = currentSaveVersion;
   pendingSaveCount += 1;
   state.sync.saving = true;
   renderSyncStatus();
@@ -522,12 +460,17 @@ function persist() {
       method: "POST",
       body: JSON.stringify({ state: snapshot }),
     }))
-    .then(() => {
+    .then((response) => {
+      if (currentSaveVersion === saveVersion && response.state) {
+        applySavedState(normalizeRemoteState(response.state));
+      }
       state.sync.error = "";
+      return true;
     })
     .catch((error) => {
       state.sync.error = error.message;
-      showToast(`Local data save failed: ${error.message}`);
+      showToast(`CSV save failed: ${error.message}`);
+      return false;
     })
     .finally(() => {
       pendingSaveCount = Math.max(0, pendingSaveCount - 1);
@@ -586,7 +529,6 @@ function render() {
   renderBoard();
   renderAlerts();
   renderDueSoon();
-  renderTimers();
   renderNotificationButton();
   renderSyncStatus();
 }
@@ -598,13 +540,13 @@ function renderSyncStatus() {
   els.syncStatus.classList.toggle("saving", state.sync.saving);
 
   if (state.sync.error) {
-    els.syncStatus.textContent = `Local project data unavailable: ${state.sync.error}`;
+    els.syncStatus.textContent = `Project CSV unavailable: ${state.sync.error}`;
   } else if (state.sync.saving) {
-    els.syncStatus.textContent = "Saving to local file...";
+    els.syncStatus.textContent = "Saving to CSV...";
   } else if (state.sync.ready) {
-    els.syncStatus.textContent = "Saved to local file";
+    els.syncStatus.textContent = "Saved to CSV";
   } else {
-    els.syncStatus.textContent = "Loading local project data...";
+    els.syncStatus.textContent = "Loading project CSV...";
   }
 }
 
@@ -620,10 +562,8 @@ function renderProjectFilter() {
 }
 
 function renderStatusControls() {
-  const taskStatus = getStatusById(els.taskStatus.value) ? els.taskStatus.value : getDefaultStatusId();
   const editStatus = getStatusById(els.editStatus.value) ? els.editStatus.value : getDefaultStatusId();
 
-  renderStatusOptions(els.taskStatus, taskStatus);
   renderStatusOptions(els.editStatus, editStatus);
 }
 
@@ -797,22 +737,6 @@ function renderDueSoon() {
   `).join("") : `<p class="empty-state">Nothing scheduled.</p>`;
 }
 
-function renderTimers() {
-  const activeTimers = state.timers.filter((timer) => !timer.completedAt);
-  els.timerList.innerHTML = activeTimers.length ? activeTimers.map((timer) => {
-    const remaining = Math.max(0, timer.endsAt - nowMs());
-    return `
-      <div class="timer-card">
-        <div>
-          <strong>${escapeHtml(timer.label)}</strong>
-          <span class="timer-time">${escapeHtml(formatDuration(remaining))}</span>
-        </div>
-        <button class="ghost-button" type="button" data-timer-id="${escapeAttr(timer.id)}">Stop</button>
-      </div>
-    `;
-  }).join("") : `<p class="empty-state">No active timers.</p>`;
-}
-
 function renderNotificationButton() {
   if (!("Notification" in window)) {
     els.notificationPermission.textContent = "Notifications unavailable";
@@ -832,44 +756,25 @@ function renderNotificationButton() {
   }
 }
 
-function addTaskFromForm(event) {
-  event.preventDefault();
-  const checklistItems = normalizeText(els.taskChecklist.value)
-    .split("\n")
-    .map((text) => normalizeText(text))
-    .filter(Boolean)
-    .map((text) => ({ id: uid("check"), text, done: false, dueAt: "", notified: {} }));
-  const checklist = checklistItems.length
-    ? [{ id: uid("checklist"), title: "Checklist", items: checklistItems }]
-    : [];
-
-  state.tasks.unshift({
-    id: uid("task"),
-    title: normalizeText(els.taskTitle.value),
-    project: normalizeText(els.taskProject.value),
-    notes: normalizeText(els.taskNotes.value),
-    status: els.taskStatus.value,
-    priority: els.taskPriority.value,
-    dueAt: els.taskDue.value ? new Date(els.taskDue.value).toISOString() : "",
-    reminderAt: els.taskReminder.value ? new Date(els.taskReminder.value).toISOString() : "",
-    checklist,
-    createdAt: nowMs(),
-    updatedAt: nowMs(),
-    notified: {},
-  });
-
-  els.taskForm.reset();
-  els.taskStatus.value = getDefaultStatusId();
-  els.taskPriority.value = "normal";
-  persist();
-  render();
-  showToast("Task added");
+function openNewTask() {
+  els.editForm.reset();
+  els.editTaskId.value = "";
+  els.dialogMode.textContent = "New task";
+  els.dialogTitle.textContent = "New task";
+  els.editStatus.value = getDefaultStatusId();
+  els.editPriority.value = "normal";
+  els.deleteTask.hidden = true;
+  els.saveTask.textContent = "Add task";
+  renderChecklistEditor({ checklist: [] });
+  els.dialog.showModal();
+  els.editTitle.focus();
 }
 
 function openTask(taskId) {
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task) return;
   els.editTaskId.value = task.id;
+  els.dialogMode.textContent = "Edit task";
   els.dialogTitle.textContent = task.title;
   els.editTitle.value = task.title;
   els.editProject.value = task.project || "";
@@ -878,6 +783,8 @@ function openTask(taskId) {
   els.editPriority.value = task.priority;
   els.editDue.value = toLocalInputValue(task.dueAt);
   els.editReminder.value = toLocalInputValue(task.reminderAt);
+  els.deleteTask.hidden = false;
+  els.saveTask.textContent = "Save";
   renderChecklistEditor(task);
   els.dialog.showModal();
 }
@@ -974,13 +881,51 @@ function collectChecklistEditor() {
     .filter(Boolean);
 }
 
-function saveEditedTask() {
+async function saveEditedTask() {
+  if (!els.editForm.reportValidity()) return;
+
+  const title = normalizeText(els.editTitle.value);
+  if (!title) {
+    els.editTitle.focus();
+    showToast("Task name is required");
+    return;
+  }
+
   const task = state.tasks.find((item) => item.id === els.editTaskId.value);
-  if (!task) return;
+  if (!task) {
+    const timestamp = nowMs();
+    const newTask = {
+      id: uid("task"),
+      title,
+      project: normalizeText(els.editProject.value),
+      notes: normalizeText(els.editNotes.value),
+      status: els.editStatus.value,
+      priority: els.editPriority.value,
+      dueAt: els.editDue.value ? new Date(els.editDue.value).toISOString() : "",
+      reminderAt: els.editReminder.value ? new Date(els.editReminder.value).toISOString() : "",
+      checklist: collectChecklistEditor(),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      notified: {},
+    };
+
+    state.tasks.unshift(newTask);
+    const saved = await persist();
+    if (!saved) {
+      state.tasks = state.tasks.filter((item) => item.id !== newTask.id);
+      return;
+    }
+    render();
+    els.dialog.close();
+    showToast("Task added");
+    return;
+  }
+
+  const previousTask = JSON.parse(JSON.stringify(task));
   const oldDue = task.dueAt;
   const oldReminder = task.reminderAt;
 
-  task.title = normalizeText(els.editTitle.value);
+  task.title = title;
   task.project = normalizeText(els.editProject.value);
   task.notes = normalizeText(els.editNotes.value);
   task.status = els.editStatus.value;
@@ -994,16 +939,25 @@ function saveEditedTask() {
     task.notified = {};
   }
 
-  persist();
+  const saved = await persist();
+  if (!saved) {
+    Object.assign(task, previousTask);
+    return;
+  }
   render();
   els.dialog.close();
   showToast("Task saved");
 }
 
-function deleteEditedTask() {
+async function deleteEditedTask() {
   const taskId = els.editTaskId.value;
+  const previousTasks = state.tasks;
   state.tasks = state.tasks.filter((task) => task.id !== taskId);
-  persist();
+  const saved = await persist();
+  if (!saved) {
+    state.tasks = previousTasks;
+    return;
+  }
   render();
   els.dialog.close();
   showToast("Task deleted");
@@ -1049,30 +1003,6 @@ function persistChecklistEditor() {
   render();
 }
 
-function startTimer(event) {
-  event.preventDefault();
-  const minutes = Math.max(1, Number(els.timerMinutes.value || 1));
-  const label = normalizeText(els.timerLabel.value) || `${minutes} minute timer`;
-
-  state.timers.push({
-    id: uid("timer"),
-    label,
-    endsAt: nowMs() + minutes * 60 * 1000,
-    createdAt: nowMs(),
-    completedAt: null,
-  });
-
-  els.timerLabel.value = "";
-  persist();
-  render();
-}
-
-function stopTimer(timerId) {
-  state.timers = state.timers.filter((timer) => timer.id !== timerId);
-  persist();
-  render();
-}
-
 function checkNotifications() {
   const current = nowMs();
   let changed = false;
@@ -1107,19 +1037,9 @@ function checkNotifications() {
     });
   });
 
-  state.timers.forEach((timer) => {
-    if (!timer.completedAt && timer.endsAt <= current) {
-      timer.completedAt = current;
-      sendAlert("Timer done", timer.label, `${timer.label} finished`);
-      changed = true;
-    }
-  });
-
   if (changed) {
     persist();
     render();
-  } else {
-    renderTimers();
   }
 }
 
@@ -1140,17 +1060,6 @@ function sendAlert(title, message, browserMessage) {
   }
 
   showToast(`${title}: ${message}`);
-}
-
-function formatDuration(ms) {
-  const totalSeconds = Math.ceil(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  }
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function capitalize(value) {
@@ -1230,7 +1139,6 @@ function addStatus() {
   state.statuses.push(status);
   persist();
   render();
-  els.taskStatus.value = status.id;
   showToast(`${status.label} list added`);
 }
 
@@ -1317,9 +1225,6 @@ function removeHomeTodoItem(itemId) {
   }, true, true);
 }
 
-els.taskForm.addEventListener("submit", addTaskFromForm);
-els.timerForm.addEventListener("submit", startTimer);
-
 els.board.addEventListener("click", (event) => {
   const statusAction = event.target.closest("[data-status-action]");
   if (statusAction) {
@@ -1382,11 +1287,6 @@ els.board.addEventListener("dragend", (event) => {
 els.dueSoonList.addEventListener("click", (event) => {
   const card = event.target.closest("[data-task-id]");
   if (card) openTask(card.dataset.taskId);
-});
-
-els.timerList.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-timer-id]");
-  if (button) stopTimer(button.dataset.timerId);
 });
 
 els.searchInput.addEventListener("input", (event) => {
@@ -1455,9 +1355,7 @@ els.notificationPermission.addEventListener("click", async () => {
   renderNotificationButton();
 });
 
-els.newTaskButton.addEventListener("click", () => {
-  els.taskTitle.focus();
-});
+els.newTaskButton.addEventListener("click", openNewTask);
 
 els.saveTask.addEventListener("click", saveEditedTask);
 els.deleteTask.addEventListener("click", deleteEditedTask);
