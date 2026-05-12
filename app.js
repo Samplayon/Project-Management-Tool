@@ -49,6 +49,7 @@ const els = {
   homeTodoChecklistShell: document.querySelector("#home-todo-checklist-shell"),
   homeTodoChecklist: document.querySelector("#home-todo-checklist"),
   homeTodoAddItem: document.querySelector("#home-todo-add-item"),
+  homeTodoAddHeader: document.querySelector("#home-todo-add-header"),
   homeTodoModeButtons: [...document.querySelectorAll("[data-todo-mode]")],
   alertList: document.querySelector("#alert-list"),
   clearAlerts: document.querySelector("#clear-alerts"),
@@ -380,10 +381,13 @@ function normalizeTodoList(todoList) {
 }
 
 function normalizeTodoItem(item) {
+  const type = item?.type === "heading" ? "heading" : "item";
+
   return {
     id: item?.id || uid("todo-item"),
+    type,
     text: typeof item?.text === "string" ? item.text : "",
-    done: Boolean(item?.done),
+    done: type === "item" ? Boolean(item?.done) : false,
   };
 }
 
@@ -598,14 +602,23 @@ function renderHomeTodo() {
   els.homeTodoChecklistShell.hidden = !isChecklistMode;
   els.homeTodoChecklist.innerHTML = todoList.items.length
     ? todoList.items.map(renderHomeTodoItem).join("")
-    : `<p class="empty-state">No checklist items yet.</p>`;
+    : `<p class="empty-state">No checklist rows yet.</p>`;
 }
 
 function renderHomeTodoItem(item) {
+  if (item.type === "heading") {
+    return `
+      <div class="home-todo-entry home-todo-subheader" data-todo-item-id="${escapeAttr(item.id)}">
+        <input class="home-todo-entry-text home-todo-subheader-text" type="text" value="${escapeAttr(item.text)}" aria-label="To-do sub-header text">
+        <button class="icon-button" type="button" data-todo-action="remove-item" aria-label="Remove to-do sub-header">x</button>
+      </div>
+    `;
+  }
+
   return `
-    <div class="home-todo-item ${item.done ? "done" : ""}" data-todo-item-id="${escapeAttr(item.id)}">
+    <div class="home-todo-entry home-todo-item ${item.done ? "done" : ""}" data-todo-item-id="${escapeAttr(item.id)}">
       <input type="checkbox" ${item.done ? "checked" : ""} aria-label="To-do item complete">
-      <input class="home-todo-item-text" type="text" value="${escapeAttr(item.text)}" aria-label="To-do item text">
+      <input class="home-todo-entry-text home-todo-item-text" type="text" value="${escapeAttr(item.text)}" aria-label="To-do item text">
       <button class="icon-button" type="button" data-todo-action="remove-item" aria-label="Remove to-do item">x</button>
     </div>
   `;
@@ -1206,16 +1219,22 @@ function updateHomeTodoItem(itemId, updates, shouldRender = false, saveImmediate
   updateHomeTodo({ items }, shouldRender, saveImmediately);
 }
 
-function addHomeTodoItem() {
+function addHomeTodoItem(type = "item") {
   const todoList = getHomeTodoList();
+  const isHeading = type === "heading";
   const item = {
     id: uid("todo-item"),
+    type: isHeading ? "heading" : "item",
     text: "",
     done: false,
   };
 
   updateHomeTodo({ items: [...todoList.items, item] }, true, true);
-  els.homeTodoChecklist.querySelector(".home-todo-item:last-child .home-todo-item-text")?.focus();
+  els.homeTodoChecklist.querySelector(".home-todo-entry:last-child .home-todo-entry-text")?.focus();
+}
+
+function addHomeTodoHeader() {
+  addHomeTodoItem("heading");
 }
 
 function removeHomeTodoItem(itemId) {
@@ -1322,11 +1341,12 @@ els.homeTodoModeButtons.forEach((button) => {
   });
 });
 
-els.homeTodoAddItem.addEventListener("click", addHomeTodoItem);
+els.homeTodoAddItem.addEventListener("click", () => addHomeTodoItem());
+els.homeTodoAddHeader.addEventListener("click", addHomeTodoHeader);
 
 els.homeTodoChecklist.addEventListener("input", (event) => {
-  const item = event.target.closest(".home-todo-item");
-  if (!item || !event.target.classList.contains("home-todo-item-text")) return;
+  const item = event.target.closest(".home-todo-entry");
+  if (!item || !event.target.classList.contains("home-todo-entry-text")) return;
   updateHomeTodoItem(item.dataset.todoItemId, { text: event.target.value });
 });
 
@@ -1339,7 +1359,7 @@ els.homeTodoChecklist.addEventListener("change", (event) => {
 els.homeTodoChecklist.addEventListener("click", (event) => {
   const button = event.target.closest("[data-todo-action='remove-item']");
   if (!button) return;
-  const item = button.closest(".home-todo-item");
+  const item = button.closest(".home-todo-entry");
   if (item) removeHomeTodoItem(item.dataset.todoItemId);
 });
 
