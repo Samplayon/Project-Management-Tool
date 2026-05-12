@@ -9,6 +9,17 @@ const DEFAULT_STATUSES = [
   { id: "done", label: "Done" },
 ];
 
+const PRIORITY_COLOR_OPTIONS = [
+  { id: "none", label: "No color", priority: "normal" },
+  { id: "critical", label: "Critical", priority: "high" },
+  { id: "high", label: "High", priority: "high" },
+  { id: "medium", label: "Medium", priority: "normal" },
+  { id: "low", label: "Low", priority: "low" },
+];
+
+const PRIORITY_COLOR_BY_ID = new Map(PRIORITY_COLOR_OPTIONS.map((option) => [option.id, option]));
+const PRIORITY_SECTION_ORDER = ["critical", "high", "medium", "low", "none"];
+
 const TEAM_ONE_ON_ONES = [
   { id: "tyler", name: "Tyler", initials: "T" },
   { id: "johnny-huynh", name: "Johnny Huynh", initials: "JH" },
@@ -50,8 +61,12 @@ const taskDragState = {
   taskId: "",
 };
 
+const priorityMenuState = {
+  taskId: "",
+};
+
 const oneOnOneOpenIds = new Set();
-let linkedTodoNotesOpen = false;
+const openTodoSectionNoteIds = new Set();
 
 const els = {
   board: document.querySelector("#board"),
@@ -62,8 +77,6 @@ const els = {
   addListButton: document.querySelector("#add-list-button"),
   homeTodoTitle: document.querySelector("#home-todo-title"),
   homeTodoNotes: document.querySelector("#home-todo-notes"),
-  homeTodoLinkedNotesToggle: document.querySelector("#home-todo-linked-notes-toggle"),
-  homeTodoLinkedNotesPanel: document.querySelector("#home-todo-linked-notes-panel"),
   homeTodoChecklistShell: document.querySelector("#home-todo-checklist-shell"),
   homeTodoChecklist: document.querySelector("#home-todo-checklist"),
   homeTodoAddItem: document.querySelector("#home-todo-add-item"),
@@ -88,8 +101,8 @@ const els = {
   editDue: document.querySelector("#edit-due"),
   editReminder: document.querySelector("#edit-reminder"),
   editLinkedTodo: document.querySelector("#edit-linked-todo"),
-  editLinkedTodoNotesWrap: document.querySelector("#edit-linked-todo-notes-wrap"),
-  editLinkedTodoNotes: document.querySelector("#edit-linked-todo-notes"),
+  editLinkedTodoPreview: document.querySelector("#edit-linked-todo-preview"),
+  editLinkedTodoNoteLog: document.querySelector("#edit-linked-todo-note-log"),
   editChecklistList: document.querySelector("#edit-checklist-list"),
   addChecklistItem: document.querySelector("#add-checklist-item"),
   saveTask: document.querySelector("#save-task"),
@@ -108,6 +121,28 @@ function uid(prefix) {
 
 function normalizeText(value) {
   return (value || "").trim();
+}
+
+function getPriorityColorForPriority(priority) {
+  const normalized = normalizeText(priority).toLowerCase();
+  if (normalized === "high") return "high";
+  if (normalized === "low") return "low";
+  return "none";
+}
+
+function normalizePriorityColor(value, priority = "normal") {
+  const color = normalizeText(value).toLowerCase();
+  if (PRIORITY_COLOR_BY_ID.has(color)) return color;
+  return getPriorityColorForPriority(priority);
+}
+
+function getPriorityColorOption(colorId) {
+  return PRIORITY_COLOR_BY_ID.get(normalizePriorityColor(colorId)) || PRIORITY_COLOR_BY_ID.get("none");
+}
+
+function getPrioritySectionLabel(colorId) {
+  if (colorId === "none") return "No priority";
+  return getPriorityColorOption(colorId).label;
 }
 
 function createDefaultStatuses() {
@@ -234,14 +269,20 @@ function getTodoListById(todoListId) {
   return state.todoLists.find((todoList) => todoList.id === id) || null;
 }
 
-function getLinkedTodoList(task) {
-  return getTodoListById(task?.linkedTodoListId);
-}
-
 function getTasksLinkedToTodoList(todoListId) {
   const id = normalizeText(todoListId);
   if (!id) return [];
   return state.tasks.filter((task) => task.linkedTodoListId === id);
+}
+
+function getTasksLinkedToTodoSection(todoListId, sectionId) {
+  const listId = normalizeText(todoListId);
+  const headingId = normalizeText(sectionId);
+  if (!listId || !headingId) return [];
+
+  return state.tasks.filter((task) => (
+    task.linkedTodoListId === listId && task.linkedTodoSectionId === headingId
+  ));
 }
 
 function getTodoChecklistRows(todoList) {
@@ -249,13 +290,116 @@ function getTodoChecklistRows(todoList) {
   return todoList.items.filter((item) => normalizeText(item.text));
 }
 
-function getTodoChecklistProgress(todoList) {
-  const rows = getTodoChecklistRows(todoList).filter((item) => item.type !== "heading");
+function getTodoSections(todoList) {
+  if (!todoList || todoList.mode !== "checklist") return [];
+
+  const sections = [];
+  let currentSection = null;
+
+  todoList.items.forEach((item) => {
+    if (item.type === "heading") {
+      currentSection = {
+        id: item.id,
+        title: normalizeText(item.text) || "Untitled subheader",
+        todoListId: todoList.id,
+        todoListTitle: todoList.title,
+        items: [],
+      };
+      sections.push(currentSection);
+      return;
+    }
+
+    if (currentSection) {
+      currentSection.items.push(item);
+    }
+  });
+
+  return sections;
+}
+
+function getAllTodoSections() {
+  return state.todoLists.flatMap(getTodoSections);
+}
+
+function makeTodoSectionValue(todoListId, sectionId) {
+  return `${todoListId}::${sectionId}`;
+}
+
+function parseTodoSectionValue(value) {
+  const [todoListId = "", sectionId = ""] = String(value || "").split("::");
+  return {
+    linkedTodoListId: normalizeText(todoListId),
+    linkedTodoSectionId: normalizeText(sectionId),
+  };
+}
+
+function getTodoSectionById(todoListId, sectionId) {
+  const todoList = getTodoListById(todoListId);
+  const headingId = normalizeText(sectionId);
+  if (!todoList || !headingId) return null;
+  return getTodoSections(todoList).find((section) => section.id === headingId) || null;
+}
+
+function getLinkedTodoSection(task) {
+  const section = getTodoSectionById(task?.linkedTodoListId, task?.linkedTodoSectionId);
+  if (section) return section;
+
+  const legacyTodoList = getTodoListById(task?.linkedTodoListId);
+  if (!legacyTodoList) return null;
+
+  return {
+    id: "",
+    title: legacyTodoList.title,
+    todoListId: legacyTodoList.id,
+    todoListTitle: legacyTodoList.title,
+    items: getTodoChecklistRows(legacyTodoList),
+  };
+}
+
+function getTodoSectionProgress(section) {
+  const rows = (section?.items || []).filter((item) => item.type !== "heading");
   const done = rows.filter((item) => item.done).length;
   return {
     total: rows.length,
     done,
   };
+}
+
+function createLinkedTodoNote(text) {
+  const timestamp = nowMs();
+  return {
+    id: uid("linked-note"),
+    text,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function normalizeLinkedTodoNote(note) {
+  if (!note || typeof note !== "object") return null;
+  const text = normalizeText(note.text);
+  if (!text) return null;
+  const createdAt = Number(note.createdAt) || nowMs();
+
+  return {
+    id: note.id || uid("linked-note"),
+    text,
+    createdAt,
+    updatedAt: Number(note.updatedAt) || createdAt,
+  };
+}
+
+function normalizeLinkedTodoNoteLog(notes, legacyNote = "") {
+  const normalized = Array.isArray(notes)
+    ? notes.map(normalizeLinkedTodoNote).filter(Boolean)
+    : [];
+  const legacyText = normalizeText(legacyNote);
+
+  if (legacyText && !normalized.some((note) => note.text === legacyText)) {
+    normalized.push(createLinkedTodoNote(legacyText));
+  }
+
+  return normalized.sort((a, b) => a.createdAt - b.createdAt);
 }
 
 function nowMs() {
@@ -327,6 +471,7 @@ function normalizeChecklistItem(item) {
   return {
     id: item?.id || uid("check"),
     text: normalizeText(item?.text),
+    note: normalizeText(item?.note),
     done: Boolean(item?.done),
     dueAt: item?.dueAt || "",
     notified: item?.notified && typeof item.notified === "object" ? item.notified : {},
@@ -412,17 +557,22 @@ function normalizeRemoteState(remoteState) {
 }
 
 function normalizeTask(task) {
+  const priority = task.priority || "normal";
+
   return {
     id: task.id || uid("task"),
     title: task.title || "",
     project: task.project || "",
     notes: task.notes || "",
     status: task.status || "todo",
-    priority: task.priority || "normal",
+    priority,
+    priorityColor: normalizePriorityColor(task.priorityColor, priority),
     dueAt: task.dueAt || "",
     reminderAt: task.reminderAt || "",
     linkedTodoListId: normalizeText(task.linkedTodoListId),
-    linkedTodoNotes: typeof task.linkedTodoNotes === "string" ? task.linkedTodoNotes : "",
+    linkedTodoSectionId: normalizeText(task.linkedTodoSectionId),
+    linkedTodoNotes: "",
+    linkedTodoNoteLog: normalizeLinkedTodoNoteLog(task.linkedTodoNoteLog, task.linkedTodoNotes),
     checklist: normalizeChecklistGroups(task.checklist),
     createdAt: Number(task.createdAt) || nowMs(),
     updatedAt: Number(task.updatedAt) || nowMs(),
@@ -477,6 +627,7 @@ function normalizeTodoItem(item) {
     id: item?.id || uid("todo-item"),
     type,
     text: typeof item?.text === "string" ? item.text : "",
+    note: type === "item" && typeof item?.note === "string" ? item.note : "",
     done: type === "item" ? Boolean(item?.done) : false,
   };
 }
@@ -658,12 +809,12 @@ function matchesFilters(task) {
   const query = state.search.toLowerCase();
   const checklistText = normalizeChecklistGroups(task.checklist)
     .map((checklist) => checklist.items.map((item) => (
-      `${checklist.title} ${item.text} ${formatDateTime(item.dueAt)}`
+      `${checklist.title} ${item.text} ${item.note} ${formatDateTime(item.dueAt)}`
     )).join(" "))
     .join(" ");
-  const linkedTodo = getLinkedTodoList(task);
-  const linkedTodoText = linkedTodo
-    ? `${linkedTodo.title} ${task.linkedTodoNotes} ${getTodoChecklistRows(linkedTodo).map((item) => item.text).join(" ")}`
+  const linkedTodoSection = getLinkedTodoSection(task);
+  const linkedTodoText = linkedTodoSection
+    ? `${linkedTodoSection.todoListTitle} ${linkedTodoSection.title} ${(task.linkedTodoNoteLog || []).map((note) => note.text).join(" ")} ${linkedTodoSection.items.map((item) => `${item.text} ${item.note || ""}`).join(" ")}`
     : "";
   const haystack = `${task.title} ${task.project} ${task.notes} ${checklistText} ${linkedTodoText}`.toLowerCase();
   const matchesSearch = !query || haystack.includes(query);
@@ -767,60 +918,71 @@ function renderHomeTodo() {
   els.homeTodoNotes.hidden = isChecklistMode;
   els.homeTodoChecklistShell.hidden = !isChecklistMode;
   els.homeTodoChecklist.innerHTML = todoList.items.length
-    ? todoList.items.map(renderHomeTodoItem).join("")
+    ? todoList.items.map((item) => renderHomeTodoItem(item, todoList)).join("")
     : `<p class="empty-state">No checklist rows yet.</p>`;
-  renderHomeTodoLinkedNotes(todoList);
 }
 
-function renderHomeTodoItem(item) {
+function renderHomeTodoItem(item, todoList = getHomeTodoList()) {
   if (item.type === "heading") {
+    const linkedTasks = getTasksLinkedToTodoSection(todoList.id, item.id);
+    const notesOpen = openTodoSectionNoteIds.has(item.id);
+    const notesButton = linkedTasks.length
+      ? `<button class="icon-button home-todo-subheader-note-toggle ${notesOpen ? "is-active" : ""}" type="button" data-todo-action="toggle-section-notes" aria-label="Linked card notes for ${escapeAttr(item.text || "subheader")}" aria-expanded="${notesOpen}">N</button>`
+      : "";
+    const notesPanel = linkedTasks.length && notesOpen
+      ? `<div class="home-todo-section-notes" data-todo-section-notes-id="${escapeAttr(item.id)}">
+          ${linkedTasks.map(renderHomeTodoSectionNote).join("")}
+        </div>`
+      : "";
+
     return `
       <div class="home-todo-entry home-todo-subheader" data-todo-item-id="${escapeAttr(item.id)}">
         <input class="home-todo-entry-text home-todo-subheader-text" type="text" value="${escapeAttr(item.text)}" aria-label="To-do sub-header text">
-        <button class="icon-button" type="button" data-todo-action="remove-item" aria-label="Remove to-do sub-header">x</button>
+        <div class="home-todo-subheader-actions">
+          <button class="ghost-button home-todo-link-card" type="button" data-todo-action="link-section">Link</button>
+          ${notesButton}
+          <button class="icon-button" type="button" data-todo-action="remove-item" aria-label="Remove to-do sub-header">x</button>
+        </div>
       </div>
+      ${notesPanel}
     `;
   }
 
   return `
     <div class="home-todo-entry home-todo-item ${item.done ? "done" : ""}" data-todo-item-id="${escapeAttr(item.id)}">
       <input type="checkbox" ${item.done ? "checked" : ""} aria-label="To-do item complete">
-      <input class="home-todo-entry-text home-todo-item-text" type="text" value="${escapeAttr(item.text)}" aria-label="To-do item text">
+      <div class="home-todo-item-body">
+        <input class="home-todo-entry-text home-todo-item-text" type="text" value="${escapeAttr(item.text)}" aria-label="To-do item text">
+        <textarea class="home-todo-item-note" rows="1" aria-label="To-do item note">${escapeHtml(item.note || "")}</textarea>
+      </div>
       <button class="icon-button" type="button" data-todo-action="remove-item" aria-label="Remove to-do item">x</button>
     </div>
   `;
 }
 
-function renderHomeTodoLinkedNotes(todoList = getHomeTodoList()) {
-  const linkedTasks = getTasksLinkedToTodoList(todoList.id);
-  const hasLinkedTasks = linkedTasks.length > 0;
+function renderHomeTodoSectionNote(task) {
+  const notes = normalizeLinkedTodoNoteLog(task.linkedTodoNoteLog, task.linkedTodoNotes);
+  const noteLog = notes.length
+    ? `<div class="home-todo-section-note-log">
+        ${notes.map(renderHomeTodoSectionNoteEntry).join("")}
+      </div>`
+    : "";
 
-  els.homeTodoLinkedNotesToggle.hidden = !hasLinkedTasks;
-  els.homeTodoLinkedNotesToggle.classList.toggle("is-active", hasLinkedTasks && linkedTodoNotesOpen);
-  els.homeTodoLinkedNotesToggle.setAttribute("aria-expanded", String(hasLinkedTasks && linkedTodoNotesOpen));
-
-  if (!hasLinkedTasks) {
-    linkedTodoNotesOpen = false;
-    els.homeTodoLinkedNotesPanel.hidden = true;
-    els.homeTodoLinkedNotesPanel.innerHTML = "";
-    return;
-  }
-
-  els.homeTodoLinkedNotesPanel.hidden = !linkedTodoNotesOpen;
-  if (!linkedTodoNotesOpen) {
-    els.homeTodoLinkedNotesPanel.innerHTML = "";
-    return;
-  }
-
-  els.homeTodoLinkedNotesPanel.innerHTML = linkedTasks.map(renderHomeTodoLinkedNote).join("");
+  return `
+    <div class="home-todo-section-note" data-linked-task-id="${escapeAttr(task.id)}">
+      <span>${escapeHtml(task.title || "Untitled card")}</span>
+      ${noteLog}
+      <input class="home-todo-section-note-input" type="text" aria-label="Add linked card note for ${escapeAttr(task.title || "Untitled card")}" autocomplete="off">
+    </div>
+  `;
 }
 
-function renderHomeTodoLinkedNote(task) {
+function renderHomeTodoSectionNoteEntry(note) {
   return `
-    <label class="home-todo-linked-note" data-linked-task-id="${escapeAttr(task.id)}">
-      <span>${escapeHtml(task.title || "Untitled card")}</span>
-      <textarea class="home-todo-linked-note-input" rows="3" aria-label="Linked card note for ${escapeAttr(task.title || "Untitled card")}">${escapeHtml(task.linkedTodoNotes)}</textarea>
-    </label>
+    <div class="home-todo-section-note-entry">
+      <span>${escapeHtml(note.text)}</span>
+      <time>${escapeHtml(formatDateTime(note.createdAt))}</time>
+    </div>
   `;
 }
 
@@ -859,75 +1021,95 @@ function renderBoard() {
           </div>
         </div>
         <div class="task-list" data-status-id="${escapeAttr(status.id)}">
-          ${tasks.length ? tasks.map(renderTaskCard).join("") : `<p class="empty-state">No tasks here.</p>`}
+          ${tasks.length ? renderPrioritySections(tasks) : `<p class="empty-state">No tasks here.</p>`}
         </div>
       </section>
     `;
   }).join("");
 }
 
-function renderTaskCard(task) {
-  const progress = getChecklistProgress(task);
-  const dueState = getTaskDueState(task);
-  const duePill = task.dueAt ? `<span class="pill ${dueState === "overdue" ? "overdue" : dueState === "today" ? "today" : "due"}">${dueState === "overdue" ? "Overdue" : "Due"} ${escapeHtml(formatDateTime(task.dueAt))}</span>` : "";
-  const reminderPill = task.reminderAt ? `<span class="pill reminder">Reminder ${escapeHtml(formatDateTime(task.reminderAt))}</span>` : "";
-  const projectPill = `<span class="pill">${escapeHtml(task.project || "No project")}</span>`;
-  const priorityPill = task.priority !== "normal" ? `<span class="pill ${escapeAttr(task.priority)}">${escapeHtml(capitalize(task.priority))}</span>` : "";
-  const notes = task.notes ? `<p class="task-card-notes">${escapeHtml(truncate(task.notes, 120))}</p>` : "";
-  const linkedTodo = renderLinkedTodoCard(task);
-  const checklistLabel = progress.total
-    ? `${progress.done}/${progress.total} items`
-    : `${progress.groups} checklist${progress.groups === 1 ? "" : "s"}`;
-  const checklist = progress.groups ? `
-    <div>
-      <div class="checklist-preview">
-        <span class="pill">${escapeHtml(checklistLabel)}</span>
-        ${progress.groups > 1 && progress.total ? `<span class="pill">${progress.groups} checklists</span>` : ""}
-        ${progress.dueDates ? `<span class="pill">${progress.dueDates} item due date${progress.dueDates === 1 ? "" : "s"}</span>` : ""}
+function renderPrioritySections(tasks) {
+  const tasksByPriority = new Map(PRIORITY_SECTION_ORDER.map((colorId) => [colorId, []]));
+
+  tasks.forEach((task) => {
+    const priorityColor = normalizePriorityColor(task.priorityColor, task.priority);
+    const group = tasksByPriority.get(priorityColor) || tasksByPriority.get("none");
+    group.push(task);
+  });
+
+  return PRIORITY_SECTION_ORDER
+    .map((colorId) => renderPrioritySection(colorId, tasksByPriority.get(colorId) || []))
+    .filter(Boolean)
+    .join("");
+}
+
+function renderPrioritySection(colorId, tasks) {
+  if (!tasks.length) return "";
+
+  const label = getPrioritySectionLabel(colorId);
+  return `
+    <section class="priority-section priority-section-${escapeAttr(colorId)}" aria-label="${escapeAttr(label)} priority tasks">
+      <div class="priority-section-header">
+        <span class="priority-section-name">${escapeHtml(label)}</span>
+        <span class="priority-section-count">${tasks.length}</span>
       </div>
-      ${progress.total ? `<div class="progress-bar" aria-label="Checklist progress">
-        <div class="progress-fill" style="width: ${progress.percent}%"></div>
-      </div>` : ""}
-    </div>
-  ` : "";
+      <div class="priority-section-cards">
+        ${tasks.map(renderTaskCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderTaskCard(task) {
+  const priorityColor = normalizePriorityColor(task.priorityColor, task.priority);
+  const taskClasses = [
+    "task-card",
+    task.status === "done" ? "done" : "",
+    priorityColor !== "none" ? `priority-${priorityColor}` : "",
+  ].filter(Boolean).join(" ");
 
   return `
-    <button class="task-card ${task.status === "done" ? "done" : ""}" type="button" draggable="true" data-task-id="${escapeAttr(task.id)}" data-status-id="${escapeAttr(task.status)}">
-      <div class="task-card-meta">${projectPill}${priorityPill}</div>
+    <button class="${taskClasses}" type="button" draggable="true" data-task-id="${escapeAttr(task.id)}" data-status-id="${escapeAttr(task.status)}" data-priority-color="${escapeAttr(priorityColor)}">
       <h3 class="task-card-title">${escapeHtml(task.title)}</h3>
-      ${notes}
-      ${linkedTodo}
-      ${checklist}
-      <div class="task-card-footer">${duePill}${reminderPill}</div>
     </button>
   `;
 }
 
-function renderLinkedTodoCard(task) {
-  const todoList = getLinkedTodoList(task);
-  if (!todoList) return "";
+function renderLinkedTodoDialogPreview(section) {
+  if (!section) return "";
 
-  const rows = getTodoChecklistRows(todoList);
-  const progress = getTodoChecklistProgress(todoList);
+  const rows = section.items.filter((item) => normalizeText(item.text));
+  const progress = getTodoSectionProgress(section);
   const progressPill = progress.total
     ? `<span class="pill">${progress.done}/${progress.total} linked items</span>`
     : `<span class="pill">Linked checklist</span>`;
-  const linkedNotes = task.linkedTodoNotes
-    ? `<p class="task-card-linked-note">${escapeHtml(truncate(task.linkedTodoNotes, 180))}</p>`
-    : "";
   const rowMarkup = rows.length
     ? `<div class="linked-todo-card-list">${rows.map(renderLinkedTodoCardRow).join("")}</div>`
     : `<p class="task-card-linked-empty">No checklist rows yet.</p>`;
 
   return `
-    <section class="task-card-linked-todo" aria-label="Linked to-do checklist">
+    <section class="edit-linked-todo-checklist" aria-label="Linked to-do checklist">
       <div class="checklist-preview">
-        <span class="pill">${escapeHtml(todoList.title)}</span>
+        <span class="pill">${escapeHtml(section.title)}</span>
+        <span class="pill">${escapeHtml(section.todoListTitle)}</span>
         ${progressPill}
       </div>
-      ${linkedNotes}
       ${rowMarkup}
     </section>
+  `;
+}
+
+function renderLinkedTodoDialogNoteLog(task) {
+  const notes = normalizeLinkedTodoNoteLog(task.linkedTodoNoteLog, task.linkedTodoNotes);
+  if (!notes.length) return "";
+
+  return `
+    <div class="edit-linked-todo-notes">
+      <strong class="edit-linked-todo-notes-title">Notes</strong>
+      ${notes.map((note) => `
+        <p class="edit-linked-todo-note">${escapeHtml(note.text)}</p>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -939,12 +1121,17 @@ function renderLinkedTodoCardRow(item) {
   return `
     <div class="linked-todo-card-row ${item.done ? "done" : ""}">
       <span>${item.done ? "[x]" : "[ ]"}</span>
-      <span>${escapeHtml(item.text)}</span>
+      <span class="linked-todo-card-copy">
+        <span>${escapeHtml(item.text)}</span>
+        ${item.note ? `<small class="linked-todo-card-note">${escapeHtml(item.note)}</small>` : ""}
+      </span>
     </div>
   `;
 }
 
 function renderAlerts() {
+  if (!els.alertList) return;
+
   const alerts = [...state.alerts].sort((a, b) => b.createdAt - a.createdAt).slice(0, 20);
   els.alertList.innerHTML = alerts.length ? alerts.map((alert) => `
     <div class="alert-item">
@@ -958,6 +1145,8 @@ function renderAlerts() {
 }
 
 function renderDueSoon() {
+  if (!els.dueSoonList) return;
+
   const taskEntries = state.tasks
     .filter((task) => task.status !== "done" && task.dueAt)
     .map((task) => ({
@@ -1121,34 +1310,56 @@ function openTask(taskId) {
 }
 
 function renderLinkedTodoEditor(task = {}) {
-  const currentId = normalizeText(task.linkedTodoListId);
+  const current = task.linkedTodoListId && task.linkedTodoSectionId
+    ? makeTodoSectionValue(task.linkedTodoListId, task.linkedTodoSectionId)
+    : "";
+  const sections = getAllTodoSections();
   const options = [
-    `<option value="">No linked to-do checklist</option>`,
-    ...state.todoLists.map((todoList) => {
-      const modeLabel = todoList.mode === "checklist" ? "" : " (free type)";
-      return `<option value="${escapeAttr(todoList.id)}">${escapeHtml(todoList.title)}${modeLabel}</option>`;
-    }),
+    `<option value="">No linked to-do subheader</option>`,
+    ...sections.map((section) => (
+      `<option value="${escapeAttr(makeTodoSectionValue(section.todoListId, section.id))}">${escapeHtml(section.todoListTitle)} / ${escapeHtml(section.title)}</option>`
+    )),
   ];
 
   els.editLinkedTodo.innerHTML = options.join("");
-  els.editLinkedTodo.value = getTodoListById(currentId) ? currentId : "";
-  els.editLinkedTodoNotes.value = task.linkedTodoNotes || "";
-  renderLinkedTodoNotesField();
+  els.editLinkedTodo.value = sections.some((section) => makeTodoSectionValue(section.todoListId, section.id) === current)
+    ? current
+    : "";
+  renderLinkedTodoDialogDetails(task);
 }
 
-function renderLinkedTodoNotesField() {
-  const isLinked = Boolean(els.editLinkedTodo.value);
-  els.editLinkedTodoNotesWrap.hidden = !isLinked;
-  if (!isLinked) {
-    els.editLinkedTodoNotes.value = "";
-  }
+function renderLinkedTodoDialogDetails(task = {}) {
+  const { linkedTodoListId, linkedTodoSectionId } = parseTodoSectionValue(els.editLinkedTodo.value);
+  const section = getTodoSectionById(linkedTodoListId, linkedTodoSectionId);
+  const preview = renderLinkedTodoDialogPreview(section);
+  const isCurrentLink = (
+    linkedTodoListId &&
+    linkedTodoSectionId &&
+    task.linkedTodoListId === linkedTodoListId &&
+    task.linkedTodoSectionId === linkedTodoSectionId
+  );
+  const noteLog = isCurrentLink ? renderLinkedTodoDialogNoteLog(task) : "";
+
+  els.editLinkedTodoPreview.hidden = !preview;
+  els.editLinkedTodoPreview.innerHTML = preview;
+  els.editLinkedTodoNoteLog.hidden = !noteLog;
+  els.editLinkedTodoNoteLog.innerHTML = noteLog;
 }
 
-function collectLinkedTodoFields() {
-  const linkedTodoListId = normalizeText(els.editLinkedTodo.value);
+function collectLinkedTodoFields(task = {}) {
+  const { linkedTodoListId, linkedTodoSectionId } = parseTodoSectionValue(els.editLinkedTodo.value);
+  const sameLink = (
+    linkedTodoListId &&
+    linkedTodoSectionId &&
+    task.linkedTodoListId === linkedTodoListId &&
+    task.linkedTodoSectionId === linkedTodoSectionId
+  );
+
   return {
     linkedTodoListId,
-    linkedTodoNotes: linkedTodoListId ? normalizeText(els.editLinkedTodoNotes.value) : "",
+    linkedTodoSectionId,
+    linkedTodoNotes: "",
+    linkedTodoNoteLog: sameLink ? normalizeLinkedTodoNoteLog(task.linkedTodoNoteLog, task.linkedTodoNotes) : [],
   };
 }
 
@@ -1188,7 +1399,8 @@ function renderChecklistItemEditor(item) {
     <div class="checklist-row" data-check-id="${escapeAttr(item.id)}">
       <input type="checkbox" ${item.done ? "checked" : ""} aria-label="Checklist item complete">
       <div class="checklist-row-body">
-        <input type="text" value="${escapeAttr(item.text)}" aria-label="Checklist item text">
+        <input class="checklist-text-input" type="text" value="${escapeAttr(item.text)}" aria-label="Checklist item text">
+        <textarea class="checklist-note-input" rows="1" aria-label="Checklist item note">${escapeHtml(item.note)}</textarea>
         <label class="checklist-due-label">
           <span>Due</span>
           <input class="checklist-due-input" type="datetime-local" value="${escapeAttr(toLocalInputValue(item.dueAt))}">
@@ -1220,6 +1432,7 @@ function collectChecklistEditor() {
         const dueInputValue = row.querySelector(".checklist-due-input")?.value || "";
         const dueAt = dueInputValue ? new Date(dueInputValue).toISOString() : "";
         const existing = findExistingChecklistItem(els.editTaskId.value, id);
+        const text = normalizeText(row.querySelector(".checklist-text-input")?.value);
         const notified = existing?.dueAt === dueAt
           ? existing.notified
           : {};
@@ -1227,7 +1440,8 @@ function collectChecklistEditor() {
         return {
           id,
           done: row.querySelector('input[type="checkbox"]').checked,
-          text: normalizeText(row.querySelector('input[type="text"]').value),
+          text,
+          note: normalizeText(row.querySelector(".checklist-note-input")?.value),
           dueAt,
           notified,
         };
@@ -1255,7 +1469,8 @@ async function saveEditedTask() {
   }
 
   const task = state.tasks.find((item) => item.id === els.editTaskId.value);
-  const linkedTodoFields = collectLinkedTodoFields();
+  const linkedTodoFields = collectLinkedTodoFields(task);
+  const selectedPriority = els.editPriority.value;
   if (!task) {
     const timestamp = nowMs();
     const newTask = {
@@ -1264,7 +1479,8 @@ async function saveEditedTask() {
       project: normalizeText(els.editProject.value),
       notes: normalizeText(els.editNotes.value),
       status: els.editStatus.value,
-      priority: els.editPriority.value,
+      priority: selectedPriority,
+      priorityColor: getPriorityColorForPriority(selectedPriority),
       dueAt: els.editDue.value ? new Date(els.editDue.value).toISOString() : "",
       reminderAt: els.editReminder.value ? new Date(els.editReminder.value).toISOString() : "",
       ...linkedTodoFields,
@@ -1289,16 +1505,22 @@ async function saveEditedTask() {
   const previousTask = JSON.parse(JSON.stringify(task));
   const oldDue = task.dueAt;
   const oldReminder = task.reminderAt;
+  const priorityChanged = task.priority !== selectedPriority;
 
   task.title = title;
   task.project = normalizeText(els.editProject.value);
   task.notes = normalizeText(els.editNotes.value);
   task.status = els.editStatus.value;
-  task.priority = els.editPriority.value;
+  task.priority = selectedPriority;
+  task.priorityColor = priorityChanged
+    ? getPriorityColorForPriority(selectedPriority)
+    : normalizePriorityColor(task.priorityColor, selectedPriority);
   task.dueAt = els.editDue.value ? new Date(els.editDue.value).toISOString() : "";
   task.reminderAt = els.editReminder.value ? new Date(els.editReminder.value).toISOString() : "";
   task.linkedTodoListId = linkedTodoFields.linkedTodoListId;
+  task.linkedTodoSectionId = linkedTodoFields.linkedTodoSectionId;
   task.linkedTodoNotes = linkedTodoFields.linkedTodoNotes;
+  task.linkedTodoNoteLog = linkedTodoFields.linkedTodoNoteLog;
   task.checklist = collectChecklistEditor();
   task.updatedAt = nowMs();
 
@@ -1358,7 +1580,7 @@ function addChecklistItemToGroup(group) {
   wrapper.innerHTML = renderChecklistItemEditor({ id: uid("check"), text: "", done: false });
   const row = wrapper.firstElementChild;
   list.append(row);
-  row.querySelector('input[type="text"]').focus();
+  row.querySelector(".checklist-text-input").focus();
 }
 
 function persistChecklistEditor() {
@@ -1460,6 +1682,95 @@ function showToast(message) {
   document.body.append(toast);
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => toast.remove(), 2800);
+}
+
+function getPriorityColorMenu() {
+  let menu = document.querySelector("#priority-color-menu");
+  if (menu) return menu;
+
+  menu = document.createElement("div");
+  menu.id = "priority-color-menu";
+  menu.className = "priority-color-menu";
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+  menu.innerHTML = PRIORITY_COLOR_OPTIONS.map((option) => `
+    <button type="button" role="menuitemradio" data-priority-color="${escapeAttr(option.id)}" aria-checked="false">
+      <span class="priority-menu-swatch priority-${escapeAttr(option.id)}" aria-hidden="true"></span>
+      <span>${escapeHtml(option.label)}</span>
+    </button>
+  `).join("");
+
+  menu.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-priority-color]");
+    if (!button) return;
+
+    event.preventDefault();
+    const taskId = priorityMenuState.taskId;
+    closePriorityColorMenu();
+    updateTaskPriorityColor(taskId, button.dataset.priorityColor);
+  });
+
+  document.body.append(menu);
+  return menu;
+}
+
+function openPriorityColorMenu(taskId, clientX, clientY) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+
+  const menu = getPriorityColorMenu();
+  const currentColor = normalizePriorityColor(task.priorityColor, task.priority);
+  priorityMenuState.taskId = task.id;
+
+  menu.querySelectorAll("[data-priority-color]").forEach((button) => {
+    const selected = button.dataset.priorityColor === currentColor;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-checked", String(selected));
+  });
+
+  menu.hidden = false;
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+
+  const rect = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(clientX, window.innerWidth - rect.width - 8));
+  const top = Math.max(8, Math.min(clientY, window.innerHeight - rect.height - 8));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+
+  (menu.querySelector(".is-selected") || menu.querySelector("button"))?.focus({ preventScroll: true });
+}
+
+function closePriorityColorMenu() {
+  const menu = document.querySelector("#priority-color-menu");
+  if (menu) menu.hidden = true;
+  priorityMenuState.taskId = "";
+}
+
+async function updateTaskPriorityColor(taskId, colorId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+
+  const option = getPriorityColorOption(colorId);
+  const previous = {
+    priority: task.priority,
+    priorityColor: task.priorityColor,
+    updatedAt: task.updatedAt,
+  };
+
+  task.priority = option.priority;
+  task.priorityColor = option.id;
+  task.updatedAt = nowMs();
+  renderBoard();
+
+  const saved = await persist();
+  if (!saved) {
+    Object.assign(task, previous);
+    renderBoard();
+    return;
+  }
+
+  showToast(option.id === "none" ? "Priority color cleared" : `${option.label} priority color set`);
 }
 
 function getDropColumn(event) {
@@ -1584,6 +1895,7 @@ function addHomeTodoItem(type = "item") {
     id: uid("todo-item"),
     type: isHeading ? "heading" : "item",
     text: "",
+    note: "",
     done: false,
   };
 
@@ -1597,19 +1909,84 @@ function addHomeTodoHeader() {
 
 function removeHomeTodoItem(itemId) {
   const todoList = getHomeTodoList();
+  const removedItem = todoList.items.find((item) => item.id === itemId);
+
+  if (removedItem?.type === "heading") {
+    getTasksLinkedToTodoSection(todoList.id, itemId).forEach((task) => {
+      task.linkedTodoListId = "";
+      task.linkedTodoSectionId = "";
+      task.linkedTodoNotes = "";
+      task.linkedTodoNoteLog = [];
+      task.updatedAt = nowMs();
+    });
+    openTodoSectionNoteIds.delete(itemId);
+  }
+
   updateHomeTodo({
     items: todoList.items.filter((item) => item.id !== itemId),
   }, true, true);
 }
 
-function updateLinkedTodoNotes(taskId, notes) {
+function linkTodoSectionToTask(sectionId) {
+  const todoList = getHomeTodoList();
+  const section = getTodoSectionById(todoList.id, sectionId);
+  if (!section) return;
+
+  if (!state.tasks.length) {
+    showToast("Create a card first");
+    return;
+  }
+
+  const taskOptions = state.tasks.map((task, index) => `${index + 1}. ${task.title || "Untitled card"}`).join("\n");
+  const selection = window.prompt(`Type a card number to link "${section.title}" to:\n\n${taskOptions}`);
+  if (!selection) return;
+
+  const selectedIndex = Number(selection) - 1;
+  const selectedTask = Number.isInteger(selectedIndex)
+    ? state.tasks[selectedIndex]
+    : state.tasks.find((task) => (task.title || "").toLowerCase() === selection.toLowerCase());
+
+  if (!selectedTask) {
+    showToast("No matching card found");
+    return;
+  }
+
+  const isSameLink = (
+    selectedTask.linkedTodoListId === section.todoListId &&
+    selectedTask.linkedTodoSectionId === section.id
+  );
+
+  selectedTask.linkedTodoListId = section.todoListId;
+  selectedTask.linkedTodoSectionId = section.id;
+  if (!isSameLink) {
+    selectedTask.linkedTodoNotes = "";
+    selectedTask.linkedTodoNoteLog = [];
+  }
+  selectedTask.updatedAt = nowMs();
+  openTodoSectionNoteIds.add(section.id);
+  persist();
+  render();
+  showToast(`Linked ${section.title} to ${selectedTask.title}`);
+}
+
+function addLinkedTodoNote(taskId, text) {
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task) return;
 
-  task.linkedTodoNotes = notes;
+  const noteText = normalizeText(text);
+  if (!noteText) return;
+
+  const existingNotes = normalizeLinkedTodoNoteLog(task.linkedTodoNoteLog, task.linkedTodoNotes);
+  task.linkedTodoNotes = "";
+  task.linkedTodoNoteLog = [
+    ...existingNotes,
+    createLinkedTodoNote(noteText),
+  ];
   task.updatedAt = nowMs();
   scheduleHomeTodoPersist();
+  renderHomeTodo();
   renderBoard();
+  els.homeTodoChecklist.querySelector(`[data-linked-task-id="${task.id}"] .home-todo-section-note-input`)?.focus();
 }
 
 function getOneOnOne(personId) {
@@ -1674,6 +2051,17 @@ function deleteOneOnOneNote(card, noteId) {
   showToast("1:1 note deleted");
 }
 
+els.board.addEventListener("contextmenu", (event) => {
+  const card = event.target.closest(".task-card[data-task-id]");
+  if (!card) {
+    closePriorityColorMenu();
+    return;
+  }
+
+  event.preventDefault();
+  openPriorityColorMenu(card.dataset.taskId, event.clientX, event.clientY);
+});
+
 els.board.addEventListener("click", (event) => {
   const statusAction = event.target.closest("[data-status-action]");
   if (statusAction) {
@@ -1685,6 +2073,21 @@ els.board.addEventListener("click", (event) => {
   const card = event.target.closest("[data-task-id]");
   if (card) openTask(card.dataset.taskId);
 });
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#priority-color-menu")) {
+    closePriorityColorMenu();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closePriorityColorMenu();
+  }
+});
+
+window.addEventListener("resize", closePriorityColorMenu);
+window.addEventListener("scroll", closePriorityColorMenu, true);
 
 els.board.addEventListener("dragstart", (event) => {
   const card = event.target.closest(".task-card[data-task-id]");
@@ -1733,10 +2136,12 @@ els.board.addEventListener("dragend", (event) => {
   clearDragTargets();
 });
 
-els.dueSoonList.addEventListener("click", (event) => {
-  const card = event.target.closest("[data-task-id]");
-  if (card) openTask(card.dataset.taskId);
-});
+if (els.dueSoonList) {
+  els.dueSoonList.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-task-id]");
+    if (card) openTask(card.dataset.taskId);
+  });
+}
 
 els.oneOnOneList.addEventListener("toggle", (event) => {
   const card = event.target.closest("details[data-one-on-one-id]");
@@ -1795,20 +2200,6 @@ els.homeTodoNotes.addEventListener("input", (event) => {
   updateHomeTodo({ notes: event.target.value });
 });
 
-els.homeTodoLinkedNotesToggle.addEventListener("click", () => {
-  linkedTodoNotesOpen = !linkedTodoNotesOpen;
-  renderHomeTodoLinkedNotes();
-  if (linkedTodoNotesOpen) {
-    els.homeTodoLinkedNotesPanel.querySelector("textarea")?.focus();
-  }
-});
-
-els.homeTodoLinkedNotesPanel.addEventListener("input", (event) => {
-  if (!event.target.classList.contains("home-todo-linked-note-input")) return;
-  const note = event.target.closest("[data-linked-task-id]");
-  updateLinkedTodoNotes(note?.dataset.linkedTaskId, event.target.value);
-});
-
 els.homeTodoModeButtons.forEach((button) => {
   button.addEventListener("click", () => {
     updateHomeTodo({
@@ -1822,8 +2213,23 @@ els.homeTodoAddHeader.addEventListener("click", addHomeTodoHeader);
 
 els.homeTodoChecklist.addEventListener("input", (event) => {
   const item = event.target.closest(".home-todo-entry");
-  if (!item || !event.target.classList.contains("home-todo-entry-text")) return;
-  updateHomeTodoItem(item.dataset.todoItemId, { text: event.target.value });
+  if (!item) return;
+
+  if (event.target.classList.contains("home-todo-entry-text")) {
+    updateHomeTodoItem(item.dataset.todoItemId, { text: event.target.value });
+  }
+
+  if (event.target.classList.contains("home-todo-item-note")) {
+    updateHomeTodoItem(item.dataset.todoItemId, { note: event.target.value });
+  }
+});
+
+els.homeTodoChecklist.addEventListener("keydown", (event) => {
+  if (!event.target.classList.contains("home-todo-section-note-input") || event.key !== "Enter") return;
+
+  event.preventDefault();
+  const note = event.target.closest("[data-linked-task-id]");
+  addLinkedTodoNote(note?.dataset.linkedTaskId, event.target.value);
 });
 
 els.homeTodoChecklist.addEventListener("change", (event) => {
@@ -1833,17 +2239,38 @@ els.homeTodoChecklist.addEventListener("change", (event) => {
 });
 
 els.homeTodoChecklist.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-todo-action='remove-item']");
+  const button = event.target.closest("[data-todo-action]");
   if (!button) return;
+  const action = button.dataset.todoAction;
   const item = button.closest(".home-todo-entry");
-  if (item) removeHomeTodoItem(item.dataset.todoItemId);
+
+  if (action === "link-section" && item) {
+    linkTodoSectionToTask(item.dataset.todoItemId);
+    return;
+  }
+
+  if (action === "toggle-section-notes" && item) {
+    if (openTodoSectionNoteIds.has(item.dataset.todoItemId)) {
+      openTodoSectionNoteIds.delete(item.dataset.todoItemId);
+    } else {
+      openTodoSectionNoteIds.add(item.dataset.todoItemId);
+    }
+    renderHomeTodo();
+    return;
+  }
+
+  if (action === "remove-item" && item) {
+    removeHomeTodoItem(item.dataset.todoItemId);
+  }
 });
 
-els.clearAlerts.addEventListener("click", () => {
-  state.alerts = [];
-  persist();
-  renderAlerts();
-});
+if (els.clearAlerts) {
+  els.clearAlerts.addEventListener("click", () => {
+    state.alerts = [];
+    persist();
+    renderAlerts();
+  });
+}
 
 els.notificationPermission.addEventListener("click", async () => {
   if (!("Notification" in window)) return;
@@ -1856,7 +2283,10 @@ els.newTaskButton.addEventListener("click", openNewTask);
 els.saveTask.addEventListener("click", saveEditedTask);
 els.deleteTask.addEventListener("click", deleteEditedTask);
 els.addChecklistItem.addEventListener("click", addChecklistEditorGroup);
-els.editLinkedTodo.addEventListener("change", renderLinkedTodoNotesField);
+els.editLinkedTodo.addEventListener("change", () => {
+  const task = state.tasks.find((item) => item.id === els.editTaskId.value);
+  renderLinkedTodoDialogDetails(task);
+});
 els.closeDialog.addEventListener("click", () => els.dialog.close());
 els.cancelEdit.addEventListener("click", () => els.dialog.close());
 
