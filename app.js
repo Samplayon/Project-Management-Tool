@@ -9,12 +9,24 @@ const DEFAULT_STATUSES = [
   { id: "done", label: "Done" },
 ];
 
+const TEAM_ONE_ON_ONES = [
+  { id: "tyler", name: "Tyler", initials: "T" },
+  { id: "johnny-huynh", name: "Johnny Huynh", initials: "JH" },
+  { id: "kyle-snider-fst", name: "Kyle Snider-FST", initials: "KS" },
+  { id: "luke-stapleton-fst", name: "Luke Stapleton - FST", initials: "LS" },
+  { id: "mattie-mcmillan-benton", name: "Mattie Mcmillan Benton", initials: "MB" },
+  { id: "michael-rakestraw", name: "Michael Rakestraw", initials: "MR" },
+  { id: "mickey-gettemy", name: "Mickey Gettemy", initials: "MG" },
+  { id: "sunshine-patterson", name: "Sunshine Patterson", initials: "SP" },
+];
+
 const EMPTY_REMOTE_STATE = {
   tasks: [],
   alerts: [],
   timers: [],
   statuses: DEFAULT_STATUSES,
   todoLists: [createDefaultHomeTodo()],
+  oneOnOnes: createDefaultOneOnOnes(),
 };
 
 const state = {
@@ -23,6 +35,7 @@ const state = {
   timers: [],
   statuses: createDefaultStatuses(),
   todoLists: [createDefaultHomeTodo()],
+  oneOnOnes: createDefaultOneOnOnes(),
   search: "",
   project: "all",
   due: "all",
@@ -37,6 +50,9 @@ const taskDragState = {
   taskId: "",
 };
 
+const oneOnOneOpenIds = new Set();
+let linkedTodoNotesOpen = false;
+
 const els = {
   board: document.querySelector("#board"),
   summary: document.querySelector("#summary-strip"),
@@ -46,6 +62,8 @@ const els = {
   addListButton: document.querySelector("#add-list-button"),
   homeTodoTitle: document.querySelector("#home-todo-title"),
   homeTodoNotes: document.querySelector("#home-todo-notes"),
+  homeTodoLinkedNotesToggle: document.querySelector("#home-todo-linked-notes-toggle"),
+  homeTodoLinkedNotesPanel: document.querySelector("#home-todo-linked-notes-panel"),
   homeTodoChecklistShell: document.querySelector("#home-todo-checklist-shell"),
   homeTodoChecklist: document.querySelector("#home-todo-checklist"),
   homeTodoAddItem: document.querySelector("#home-todo-add-item"),
@@ -54,6 +72,7 @@ const els = {
   alertList: document.querySelector("#alert-list"),
   clearAlerts: document.querySelector("#clear-alerts"),
   dueSoonList: document.querySelector("#due-soon-list"),
+  oneOnOneList: document.querySelector("#one-on-one-list"),
   notificationPermission: document.querySelector("#notification-permission"),
   newTaskButton: document.querySelector("#new-task-button"),
   dialog: document.querySelector("#task-dialog"),
@@ -68,6 +87,9 @@ const els = {
   editPriority: document.querySelector("#edit-priority"),
   editDue: document.querySelector("#edit-due"),
   editReminder: document.querySelector("#edit-reminder"),
+  editLinkedTodo: document.querySelector("#edit-linked-todo"),
+  editLinkedTodoNotesWrap: document.querySelector("#edit-linked-todo-notes-wrap"),
+  editLinkedTodoNotes: document.querySelector("#edit-linked-todo-notes"),
   editChecklistList: document.querySelector("#edit-checklist-list"),
   addChecklistItem: document.querySelector("#add-checklist-item"),
   saveTask: document.querySelector("#save-task"),
@@ -102,6 +124,33 @@ function createDefaultHomeTodo() {
     createdAt: 0,
     updatedAt: 0,
   };
+}
+
+function createDefaultOneOnOnes() {
+  return TEAM_ONE_ON_ONES.map((person) => ({
+    ...person,
+    notes: [],
+    createdAt: 0,
+    updatedAt: 0,
+  }));
+}
+
+function getTodayDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeDateKey(value) {
+  const dateKey = normalizeText(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateKey) ? dateKey : getTodayDateKey();
+}
+
+function parseDateKey(value) {
+  const dateKey = normalizeDateKey(value);
+  const date = new Date(`${dateKey}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
 }
 
 function toStatusIdBase(label) {
@@ -179,6 +228,36 @@ function getHomeTodoList() {
   return state.todoLists[0];
 }
 
+function getTodoListById(todoListId) {
+  const id = normalizeText(todoListId);
+  if (!id) return null;
+  return state.todoLists.find((todoList) => todoList.id === id) || null;
+}
+
+function getLinkedTodoList(task) {
+  return getTodoListById(task?.linkedTodoListId);
+}
+
+function getTasksLinkedToTodoList(todoListId) {
+  const id = normalizeText(todoListId);
+  if (!id) return [];
+  return state.tasks.filter((task) => task.linkedTodoListId === id);
+}
+
+function getTodoChecklistRows(todoList) {
+  if (!todoList || todoList.mode !== "checklist") return [];
+  return todoList.items.filter((item) => normalizeText(item.text));
+}
+
+function getTodoChecklistProgress(todoList) {
+  const rows = getTodoChecklistRows(todoList).filter((item) => item.type !== "heading");
+  const done = rows.filter((item) => item.done).length;
+  return {
+    total: rows.length,
+    done,
+  };
+}
+
 function nowMs() {
   return Date.now();
 }
@@ -206,6 +285,14 @@ function formatDateTime(value) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function formatDateHeader(value) {
+  return new Intl.DateTimeFormat([], {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(parseDateKey(value));
 }
 
 function isSameDay(a, b) {
@@ -320,6 +407,7 @@ function normalizeRemoteState(remoteState) {
     timers: dedupeRecordsById(Array.isArray(remoteState?.timers) ? remoteState.timers.map(normalizeTimer) : []),
     statuses: normalizeStatuses(dedupeRecordsById(remoteState?.statuses || []), tasks),
     todoLists: dedupeRecordsById(normalizeTodoLists(remoteState?.todoLists || remoteState?.todoList)),
+    oneOnOnes: normalizeOneOnOnes(remoteState?.oneOnOnes),
   };
 }
 
@@ -333,6 +421,8 @@ function normalizeTask(task) {
     priority: task.priority || "normal",
     dueAt: task.dueAt || "",
     reminderAt: task.reminderAt || "",
+    linkedTodoListId: normalizeText(task.linkedTodoListId),
+    linkedTodoNotes: typeof task.linkedTodoNotes === "string" ? task.linkedTodoNotes : "",
     checklist: normalizeChecklistGroups(task.checklist),
     createdAt: Number(task.createdAt) || nowMs(),
     updatedAt: Number(task.updatedAt) || nowMs(),
@@ -391,6 +481,66 @@ function normalizeTodoItem(item) {
   };
 }
 
+function normalizeOneOnOnes(oneOnOnes) {
+  const defaults = createDefaultOneOnOnes();
+  const peopleById = new Map(defaults.map((person) => [person.id, person]));
+
+  if (Array.isArray(oneOnOnes)) {
+    oneOnOnes.forEach((person) => {
+      const normalized = normalizeOneOnOne(person);
+      if (!normalized) return;
+      peopleById.set(normalized.id, {
+        ...peopleById.get(normalized.id),
+        ...normalized,
+      });
+    });
+  }
+
+  return [
+    ...defaults.map((person) => peopleById.get(person.id)),
+    ...[...peopleById.values()].filter((person) => !TEAM_ONE_ON_ONES.some((teamPerson) => teamPerson.id === person.id)),
+  ];
+}
+
+function normalizeOneOnOne(person) {
+  if (!person || typeof person !== "object") return null;
+  const id = normalizeText(person.id);
+  if (!id) return null;
+  const teamPerson = TEAM_ONE_ON_ONES.find((item) => item.id === id);
+  const createdAt = Number(person.createdAt) || nowMs();
+
+  return {
+    id,
+    name: normalizeText(person.name) || teamPerson?.name || statusLabelFromId(id),
+    initials: normalizeText(person.initials) || teamPerson?.initials || getInitials(person.name || id),
+    notes: Array.isArray(person.notes) ? person.notes.map(normalizeOneOnOneNote).filter(Boolean) : [],
+    createdAt,
+    updatedAt: Number(person.updatedAt) || createdAt,
+  };
+}
+
+function normalizeOneOnOneNote(note) {
+  if (!note || typeof note !== "object") return null;
+  const createdAt = Number(note.createdAt) || nowMs();
+
+  return {
+    id: note.id || uid("one-on-one-note"),
+    date: normalizeDateKey(note.date),
+    text: typeof note.text === "string" ? note.text : "",
+    createdAt,
+    updatedAt: Number(note.updatedAt) || createdAt,
+  };
+}
+
+function getInitials(value) {
+  return normalizeText(value)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "1:1";
+}
+
 function getPersistableState() {
   return {
     tasks: state.tasks,
@@ -398,6 +548,7 @@ function getPersistableState() {
     timers: state.timers,
     statuses: state.statuses,
     todoLists: state.todoLists,
+    oneOnOnes: state.oneOnOnes,
   };
 }
 
@@ -407,6 +558,7 @@ function applySavedState(savedState) {
   state.timers = savedState.timers;
   state.statuses = savedState.statuses;
   state.todoLists = savedState.todoLists;
+  state.oneOnOnes = savedState.oneOnOnes;
 }
 
 async function requestJson(url, options = {}) {
@@ -449,6 +601,7 @@ let pendingSaveCount = 0;
 let saveQueue = Promise.resolve();
 let saveVersion = 0;
 let homeTodoSaveTimer = null;
+let oneOnOneSaveTimer = null;
 
 function persist() {
   const snapshot = getPersistableState();
@@ -493,6 +646,14 @@ function scheduleHomeTodoPersist() {
   }, 450);
 }
 
+function scheduleOneOnOnePersist() {
+  window.clearTimeout(oneOnOneSaveTimer);
+  oneOnOneSaveTimer = window.setTimeout(() => {
+    oneOnOneSaveTimer = null;
+    persist();
+  }, 450);
+}
+
 function matchesFilters(task) {
   const query = state.search.toLowerCase();
   const checklistText = normalizeChecklistGroups(task.checklist)
@@ -500,7 +661,11 @@ function matchesFilters(task) {
       `${checklist.title} ${item.text} ${formatDateTime(item.dueAt)}`
     )).join(" "))
     .join(" ");
-  const haystack = `${task.title} ${task.project} ${task.notes} ${checklistText}`.toLowerCase();
+  const linkedTodo = getLinkedTodoList(task);
+  const linkedTodoText = linkedTodo
+    ? `${linkedTodo.title} ${task.linkedTodoNotes} ${getTodoChecklistRows(linkedTodo).map((item) => item.text).join(" ")}`
+    : "";
+  const haystack = `${task.title} ${task.project} ${task.notes} ${checklistText} ${linkedTodoText}`.toLowerCase();
   const matchesSearch = !query || haystack.includes(query);
   const matchesProject = state.project === "all" || (task.project || "No project") === state.project;
   const dueState = getTaskDueState(task);
@@ -533,6 +698,7 @@ function render() {
   renderBoard();
   renderAlerts();
   renderDueSoon();
+  renderOneOnOnes();
   renderNotificationButton();
   renderSyncStatus();
 }
@@ -603,6 +769,7 @@ function renderHomeTodo() {
   els.homeTodoChecklist.innerHTML = todoList.items.length
     ? todoList.items.map(renderHomeTodoItem).join("")
     : `<p class="empty-state">No checklist rows yet.</p>`;
+  renderHomeTodoLinkedNotes(todoList);
 }
 
 function renderHomeTodoItem(item) {
@@ -621,6 +788,39 @@ function renderHomeTodoItem(item) {
       <input class="home-todo-entry-text home-todo-item-text" type="text" value="${escapeAttr(item.text)}" aria-label="To-do item text">
       <button class="icon-button" type="button" data-todo-action="remove-item" aria-label="Remove to-do item">x</button>
     </div>
+  `;
+}
+
+function renderHomeTodoLinkedNotes(todoList = getHomeTodoList()) {
+  const linkedTasks = getTasksLinkedToTodoList(todoList.id);
+  const hasLinkedTasks = linkedTasks.length > 0;
+
+  els.homeTodoLinkedNotesToggle.hidden = !hasLinkedTasks;
+  els.homeTodoLinkedNotesToggle.classList.toggle("is-active", hasLinkedTasks && linkedTodoNotesOpen);
+  els.homeTodoLinkedNotesToggle.setAttribute("aria-expanded", String(hasLinkedTasks && linkedTodoNotesOpen));
+
+  if (!hasLinkedTasks) {
+    linkedTodoNotesOpen = false;
+    els.homeTodoLinkedNotesPanel.hidden = true;
+    els.homeTodoLinkedNotesPanel.innerHTML = "";
+    return;
+  }
+
+  els.homeTodoLinkedNotesPanel.hidden = !linkedTodoNotesOpen;
+  if (!linkedTodoNotesOpen) {
+    els.homeTodoLinkedNotesPanel.innerHTML = "";
+    return;
+  }
+
+  els.homeTodoLinkedNotesPanel.innerHTML = linkedTasks.map(renderHomeTodoLinkedNote).join("");
+}
+
+function renderHomeTodoLinkedNote(task) {
+  return `
+    <label class="home-todo-linked-note" data-linked-task-id="${escapeAttr(task.id)}">
+      <span>${escapeHtml(task.title || "Untitled card")}</span>
+      <textarea class="home-todo-linked-note-input" rows="3" aria-label="Linked card note for ${escapeAttr(task.title || "Untitled card")}">${escapeHtml(task.linkedTodoNotes)}</textarea>
+    </label>
   `;
 }
 
@@ -674,6 +874,7 @@ function renderTaskCard(task) {
   const projectPill = `<span class="pill">${escapeHtml(task.project || "No project")}</span>`;
   const priorityPill = task.priority !== "normal" ? `<span class="pill ${escapeAttr(task.priority)}">${escapeHtml(capitalize(task.priority))}</span>` : "";
   const notes = task.notes ? `<p class="task-card-notes">${escapeHtml(truncate(task.notes, 120))}</p>` : "";
+  const linkedTodo = renderLinkedTodoCard(task);
   const checklistLabel = progress.total
     ? `${progress.done}/${progress.total} items`
     : `${progress.groups} checklist${progress.groups === 1 ? "" : "s"}`;
@@ -695,9 +896,51 @@ function renderTaskCard(task) {
       <div class="task-card-meta">${projectPill}${priorityPill}</div>
       <h3 class="task-card-title">${escapeHtml(task.title)}</h3>
       ${notes}
+      ${linkedTodo}
       ${checklist}
       <div class="task-card-footer">${duePill}${reminderPill}</div>
     </button>
+  `;
+}
+
+function renderLinkedTodoCard(task) {
+  const todoList = getLinkedTodoList(task);
+  if (!todoList) return "";
+
+  const rows = getTodoChecklistRows(todoList);
+  const progress = getTodoChecklistProgress(todoList);
+  const progressPill = progress.total
+    ? `<span class="pill">${progress.done}/${progress.total} linked items</span>`
+    : `<span class="pill">Linked checklist</span>`;
+  const linkedNotes = task.linkedTodoNotes
+    ? `<p class="task-card-linked-note">${escapeHtml(truncate(task.linkedTodoNotes, 180))}</p>`
+    : "";
+  const rowMarkup = rows.length
+    ? `<div class="linked-todo-card-list">${rows.map(renderLinkedTodoCardRow).join("")}</div>`
+    : `<p class="task-card-linked-empty">No checklist rows yet.</p>`;
+
+  return `
+    <section class="task-card-linked-todo" aria-label="Linked to-do checklist">
+      <div class="checklist-preview">
+        <span class="pill">${escapeHtml(todoList.title)}</span>
+        ${progressPill}
+      </div>
+      ${linkedNotes}
+      ${rowMarkup}
+    </section>
+  `;
+}
+
+function renderLinkedTodoCardRow(item) {
+  if (item.type === "heading") {
+    return `<div class="linked-todo-card-heading">${escapeHtml(item.text)}</div>`;
+  }
+
+  return `
+    <div class="linked-todo-card-row ${item.done ? "done" : ""}">
+      <span>${item.done ? "[x]" : "[ ]"}</span>
+      <span>${escapeHtml(item.text)}</span>
+    </div>
   `;
 }
 
@@ -750,6 +993,79 @@ function renderDueSoon() {
   `).join("") : `<p class="empty-state">Nothing scheduled.</p>`;
 }
 
+function renderOneOnOnes() {
+  if (!els.oneOnOneList) return;
+
+  els.oneOnOneList.innerHTML = state.oneOnOnes.map(renderOneOnOneCard).join("");
+}
+
+function renderOneOnOneCard(person) {
+  const noteGroups = groupOneOnOneNotes(person.notes);
+  const noteMarkup = noteGroups.length
+    ? noteGroups.map(([date, notes]) => renderOneOnOneDateGroup(date, notes)).join("")
+    : `<p class="empty-state">No notes yet.</p>`;
+
+  return `
+    <details class="one-on-one-card" data-one-on-one-id="${escapeAttr(person.id)}" ${oneOnOneOpenIds.has(person.id) ? "open" : ""}>
+      <summary class="one-on-one-card-header">
+        <strong>${escapeHtml(person.name)}</strong>
+      </summary>
+      <div class="one-on-one-card-body">
+        <div class="one-on-one-note-composer">
+          <label>
+            Date
+            <input class="one-on-one-date" type="date" value="${escapeAttr(getTodayDateKey())}">
+          </label>
+          <label>
+            Note
+            <textarea class="one-on-one-draft" rows="3"></textarea>
+          </label>
+          <button class="secondary-button one-on-one-add-note" type="button" data-one-on-one-action="add-note">Add note</button>
+        </div>
+        <div class="one-on-one-notes">
+          ${noteMarkup}
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function groupOneOnOneNotes(notes) {
+  const groups = new Map();
+
+  [...notes]
+    .sort((a, b) => {
+      const dateCompare = b.date.localeCompare(a.date);
+      return dateCompare || b.createdAt - a.createdAt;
+    })
+    .forEach((note) => {
+      if (!groups.has(note.date)) groups.set(note.date, []);
+      groups.get(note.date).push(note);
+    });
+
+  return [...groups.entries()];
+}
+
+function renderOneOnOneDateGroup(date, notes) {
+  return `
+    <section class="one-on-one-date-group">
+      <h3>${escapeHtml(formatDateHeader(date))}</h3>
+      <div class="one-on-one-note-list">
+        ${notes.map(renderOneOnOneNote).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderOneOnOneNote(note) {
+  return `
+    <div class="one-on-one-note" data-one-on-one-note-id="${escapeAttr(note.id)}">
+      <textarea class="one-on-one-note-text" rows="3" aria-label="Edit 1:1 note">${escapeHtml(note.text)}</textarea>
+      <button class="icon-button" type="button" data-one-on-one-action="delete-note" aria-label="Delete 1:1 note">x</button>
+    </div>
+  `;
+}
+
 function renderNotificationButton() {
   if (!("Notification" in window)) {
     els.notificationPermission.textContent = "Notifications unavailable";
@@ -778,6 +1094,7 @@ function openNewTask() {
   els.editPriority.value = "normal";
   els.deleteTask.hidden = true;
   els.saveTask.textContent = "Add task";
+  renderLinkedTodoEditor();
   renderChecklistEditor({ checklist: [] });
   els.dialog.showModal();
   els.editTitle.focus();
@@ -798,8 +1115,41 @@ function openTask(taskId) {
   els.editReminder.value = toLocalInputValue(task.reminderAt);
   els.deleteTask.hidden = false;
   els.saveTask.textContent = "Save";
+  renderLinkedTodoEditor(task);
   renderChecklistEditor(task);
   els.dialog.showModal();
+}
+
+function renderLinkedTodoEditor(task = {}) {
+  const currentId = normalizeText(task.linkedTodoListId);
+  const options = [
+    `<option value="">No linked to-do checklist</option>`,
+    ...state.todoLists.map((todoList) => {
+      const modeLabel = todoList.mode === "checklist" ? "" : " (free type)";
+      return `<option value="${escapeAttr(todoList.id)}">${escapeHtml(todoList.title)}${modeLabel}</option>`;
+    }),
+  ];
+
+  els.editLinkedTodo.innerHTML = options.join("");
+  els.editLinkedTodo.value = getTodoListById(currentId) ? currentId : "";
+  els.editLinkedTodoNotes.value = task.linkedTodoNotes || "";
+  renderLinkedTodoNotesField();
+}
+
+function renderLinkedTodoNotesField() {
+  const isLinked = Boolean(els.editLinkedTodo.value);
+  els.editLinkedTodoNotesWrap.hidden = !isLinked;
+  if (!isLinked) {
+    els.editLinkedTodoNotes.value = "";
+  }
+}
+
+function collectLinkedTodoFields() {
+  const linkedTodoListId = normalizeText(els.editLinkedTodo.value);
+  return {
+    linkedTodoListId,
+    linkedTodoNotes: linkedTodoListId ? normalizeText(els.editLinkedTodoNotes.value) : "",
+  };
 }
 
 function renderChecklistEditor(task) {
@@ -905,6 +1255,7 @@ async function saveEditedTask() {
   }
 
   const task = state.tasks.find((item) => item.id === els.editTaskId.value);
+  const linkedTodoFields = collectLinkedTodoFields();
   if (!task) {
     const timestamp = nowMs();
     const newTask = {
@@ -916,6 +1267,7 @@ async function saveEditedTask() {
       priority: els.editPriority.value,
       dueAt: els.editDue.value ? new Date(els.editDue.value).toISOString() : "",
       reminderAt: els.editReminder.value ? new Date(els.editReminder.value).toISOString() : "",
+      ...linkedTodoFields,
       checklist: collectChecklistEditor(),
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -945,6 +1297,8 @@ async function saveEditedTask() {
   task.priority = els.editPriority.value;
   task.dueAt = els.editDue.value ? new Date(els.editDue.value).toISOString() : "";
   task.reminderAt = els.editReminder.value ? new Date(els.editReminder.value).toISOString() : "";
+  task.linkedTodoListId = linkedTodoFields.linkedTodoListId;
+  task.linkedTodoNotes = linkedTodoFields.linkedTodoNotes;
   task.checklist = collectChecklistEditor();
   task.updatedAt = nowMs();
 
@@ -1208,6 +1562,10 @@ function updateHomeTodo(updates, shouldRender = false, saveImmediately = false) 
   if (shouldRender) {
     renderHomeTodo();
   }
+
+  if (getTasksLinkedToTodoList(todoList.id).length) {
+    renderBoard();
+  }
 }
 
 function updateHomeTodoItem(itemId, updates, shouldRender = false, saveImmediately = false) {
@@ -1242,6 +1600,78 @@ function removeHomeTodoItem(itemId) {
   updateHomeTodo({
     items: todoList.items.filter((item) => item.id !== itemId),
   }, true, true);
+}
+
+function updateLinkedTodoNotes(taskId, notes) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+
+  task.linkedTodoNotes = notes;
+  task.updatedAt = nowMs();
+  scheduleHomeTodoPersist();
+  renderBoard();
+}
+
+function getOneOnOne(personId) {
+  return state.oneOnOnes.find((person) => person.id === personId) || null;
+}
+
+function getOneOnOneNote(person, noteId) {
+  return person?.notes.find((note) => note.id === noteId) || null;
+}
+
+function addOneOnOneNote(card) {
+  const person = getOneOnOne(card?.dataset.oneOnOneId);
+  if (!person) return;
+
+  const draftInput = card.querySelector(".one-on-one-draft");
+  const dateInput = card.querySelector(".one-on-one-date");
+  const text = normalizeText(draftInput?.value);
+
+  if (!text) {
+    draftInput?.focus();
+    showToast("Add a note first");
+    return;
+  }
+
+  const timestamp = nowMs();
+  person.notes.unshift({
+    id: uid("one-on-one-note"),
+    date: normalizeDateKey(dateInput?.value),
+    text,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  person.updatedAt = timestamp;
+
+  oneOnOneOpenIds.add(person.id);
+  renderOneOnOnes();
+  persist();
+  showToast("1:1 note added");
+}
+
+function updateOneOnOneNote(card, noteTextArea) {
+  const person = getOneOnOne(card?.dataset.oneOnOneId);
+  const note = getOneOnOneNote(person, noteTextArea.closest("[data-one-on-one-note-id]")?.dataset.oneOnOneNoteId);
+  if (!person || !note) return;
+
+  const timestamp = nowMs();
+  note.text = noteTextArea.value;
+  note.updatedAt = timestamp;
+  person.updatedAt = timestamp;
+  scheduleOneOnOnePersist();
+}
+
+function deleteOneOnOneNote(card, noteId) {
+  const person = getOneOnOne(card?.dataset.oneOnOneId);
+  if (!person || !noteId) return;
+
+  person.notes = person.notes.filter((note) => note.id !== noteId);
+  person.updatedAt = nowMs();
+  oneOnOneOpenIds.add(person.id);
+  renderOneOnOnes();
+  persist();
+  showToast("1:1 note deleted");
 }
 
 els.board.addEventListener("click", (event) => {
@@ -1308,6 +1738,38 @@ els.dueSoonList.addEventListener("click", (event) => {
   if (card) openTask(card.dataset.taskId);
 });
 
+els.oneOnOneList.addEventListener("toggle", (event) => {
+  const card = event.target.closest("details[data-one-on-one-id]");
+  if (!card || event.target !== card) return;
+
+  if (card.open) {
+    oneOnOneOpenIds.add(card.dataset.oneOnOneId);
+  } else {
+    oneOnOneOpenIds.delete(card.dataset.oneOnOneId);
+  }
+}, true);
+
+els.oneOnOneList.addEventListener("click", (event) => {
+  const action = event.target.closest("[data-one-on-one-action]");
+  if (!action) return;
+
+  const card = action.closest("[data-one-on-one-id]");
+  if (action.dataset.oneOnOneAction === "add-note") {
+    addOneOnOneNote(card);
+    return;
+  }
+
+  if (action.dataset.oneOnOneAction === "delete-note") {
+    const note = action.closest("[data-one-on-one-note-id]");
+    deleteOneOnOneNote(card, note?.dataset.oneOnOneNoteId);
+  }
+});
+
+els.oneOnOneList.addEventListener("input", (event) => {
+  if (!event.target.classList.contains("one-on-one-note-text")) return;
+  updateOneOnOneNote(event.target.closest("[data-one-on-one-id]"), event.target);
+});
+
 els.searchInput.addEventListener("input", (event) => {
   state.search = event.target.value;
   renderBoard();
@@ -1331,6 +1793,20 @@ els.homeTodoTitle.addEventListener("input", (event) => {
 
 els.homeTodoNotes.addEventListener("input", (event) => {
   updateHomeTodo({ notes: event.target.value });
+});
+
+els.homeTodoLinkedNotesToggle.addEventListener("click", () => {
+  linkedTodoNotesOpen = !linkedTodoNotesOpen;
+  renderHomeTodoLinkedNotes();
+  if (linkedTodoNotesOpen) {
+    els.homeTodoLinkedNotesPanel.querySelector("textarea")?.focus();
+  }
+});
+
+els.homeTodoLinkedNotesPanel.addEventListener("input", (event) => {
+  if (!event.target.classList.contains("home-todo-linked-note-input")) return;
+  const note = event.target.closest("[data-linked-task-id]");
+  updateLinkedTodoNotes(note?.dataset.linkedTaskId, event.target.value);
 });
 
 els.homeTodoModeButtons.forEach((button) => {
@@ -1380,6 +1856,7 @@ els.newTaskButton.addEventListener("click", openNewTask);
 els.saveTask.addEventListener("click", saveEditedTask);
 els.deleteTask.addEventListener("click", deleteEditedTask);
 els.addChecklistItem.addEventListener("click", addChecklistEditorGroup);
+els.editLinkedTodo.addEventListener("change", renderLinkedTodoNotesField);
 els.closeDialog.addEventListener("click", () => els.dialog.close());
 els.cancelEdit.addEventListener("click", () => els.dialog.close());
 

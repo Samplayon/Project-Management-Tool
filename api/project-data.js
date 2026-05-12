@@ -3,7 +3,7 @@ const path = require("path");
 
 const DATA_FILE_PATH = path.join(process.cwd(), "data", "project-data.csv");
 const CSV_COLUMNS = ["collection", "id", "payload_json"];
-const COLLECTION_KEYS = ["tasks", "alerts", "timers", "statuses", "todoLists"];
+const COLLECTION_KEYS = ["tasks", "alerts", "timers", "statuses", "todoLists", "oneOnOnes"];
 
 const EMPTY_STATE = {
   tasks: [],
@@ -11,6 +11,7 @@ const EMPTY_STATE = {
   timers: [],
   statuses: [],
   todoLists: [],
+  oneOnOnes: [],
 };
 
 function normalizeState(state) {
@@ -20,6 +21,7 @@ function normalizeState(state) {
     timers: dedupeRecordsById(Array.isArray(state?.timers) ? state.timers : []),
     statuses: dedupeStatuses(Array.isArray(state?.statuses) ? state.statuses : []),
     todoLists: dedupeRecordsById(Array.isArray(state?.todoLists) ? state.todoLists : []),
+    oneOnOnes: dedupeRecordsById(Array.isArray(state?.oneOnOnes) ? state.oneOnOnes : []),
   };
 }
 

@@ -24,15 +24,19 @@
         <section class="main-panel">
           <section class="home-todo-window" aria-label="Home to-do list">
             <div class="home-todo-header">
-              <label class="home-todo-title-label">
-                To-do list title
-                <input id="home-todo-title" type="text" autocomplete="off">
-              </label>
+              <div class="home-todo-title-row">
+                <label class="home-todo-title-label">
+                  To-do list title
+                  <input id="home-todo-title" type="text" autocomplete="off">
+                </label>
+                <button class="icon-button home-todo-linked-notes-toggle" id="home-todo-linked-notes-toggle" type="button" aria-label="Linked card notes" aria-expanded="false" hidden>N</button>
+              </div>
               <div class="todo-mode-toggle" role="group" aria-label="To-do list mode">
                 <button class="mode-button" type="button" data-todo-mode="notes" aria-pressed="true">Free type</button>
                 <button class="mode-button" type="button" data-todo-mode="checklist" aria-pressed="false">Checklist</button>
               </div>
             </div>
+            <div id="home-todo-linked-notes-panel" class="home-todo-linked-notes-panel" hidden></div>
             <textarea id="home-todo-notes" class="home-todo-notes" rows="12" aria-label="Free type to-do list"></textarea>
             <div class="home-todo-checklist-shell" id="home-todo-checklist-shell" hidden>
               <div id="home-todo-checklist" class="home-todo-checklist"></div>
@@ -72,7 +76,7 @@
           <div class="board" id="board" aria-label="Task board"></div>
         </section>
 
-        <aside class="right-panel" aria-label="Notifications">
+        <aside class="right-panel" aria-label="Notifications and team 1:1s">
           <section class="panel-section">
             <div class="section-heading-row">
               <h2>Alerts</h2>
@@ -83,6 +87,10 @@
           <section class="panel-section">
             <h2>Due soon</h2>
             <div id="due-soon-list" class="due-soon-list"></div>
+          </section>
+          <section class="panel-section one-on-one-section">
+            <h2>Team 1:1s</h2>
+            <div id="one-on-one-list" class="one-on-one-list" aria-label="Team 1:1 list"></div>
           </section>
         </aside>
       </main>
@@ -139,6 +147,20 @@
           <input id="edit-reminder" type="datetime-local">
         </label>
 
+        <div class="linked-todo-editor">
+          <div class="section-heading-row">
+            <h3>Linked to-do checklist</h3>
+          </div>
+          <label>
+            To-do checklist
+            <select id="edit-linked-todo"></select>
+          </label>
+          <label id="edit-linked-todo-notes-wrap" hidden>
+            Linked card notes
+            <textarea id="edit-linked-todo-notes" rows="3"></textarea>
+          </label>
+        </div>
+
         <div class="checklist-editor">
           <div class="section-heading-row">
             <h3>Checklists</h3>
@@ -157,6 +179,6 @@
       </form>
     </dialog>
 
-    <script src="app.js?v=csv-source-20260512"></script>
+    <script src="app.js?v=one-on-one-name-only-20260512"></script>
   </body>
 </html>
