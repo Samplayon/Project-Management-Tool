@@ -1053,6 +1053,72 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(141, 118, 30, 0.18);
 }
 
+.big-picture-reminders-section {
+  display: grid;
+  gap: 8px;
+}
+
+.big-picture-reminders-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.big-picture-reminders-input {
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.big-picture-reminders-add {
+  min-height: 34px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.big-picture-reminders-list {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.big-picture-reminder-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 6px;
+  align-items: start;
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+  padding: 8px;
+  padding-left: 13px;
+}
+
+.big-picture-reminder-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: var(--accent);
+}
+
+.big-picture-reminder-card span {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.big-picture-reminder-card .icon-button {
+  min-height: 30px;
+  width: 30px;
+}
+
 .alert-item,
 .due-item {
   justify-content: space-between;

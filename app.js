@@ -3,6 +3,7 @@ const HOME_TODO_ID = "home-todo";
 const DEFAULT_HOME_TODO_TITLE = "To-do list";
 const STICKY_NOTE_ID = "main-sticky-note";
 const DEFAULT_STICKY_NOTE_TITLE = "Sticky Note";
+const LEGACY_BIG_PICTURE_REMINDERS_ID = "big-picture-reminders";
 
 const DEFAULT_STATUSES = [
   { id: "todo", label: "To do" },
@@ -41,6 +42,7 @@ const EMPTY_REMOTE_STATE = {
   todoLists: [createDefaultHomeTodo()],
   oneOnOnes: createDefaultOneOnOnes(),
   stickyNotes: [createDefaultStickyNote()],
+  bigPictureReminders: [],
 };
 
 const state = {
@@ -51,6 +53,7 @@ const state = {
   todoLists: [createDefaultHomeTodo()],
   oneOnOnes: createDefaultOneOnOnes(),
   stickyNotes: [createDefaultStickyNote()],
+  bigPictureReminders: [],
   search: "",
   project: "all",
   due: "all",
@@ -91,6 +94,9 @@ const els = {
   dueSoonList: document.querySelector("#due-soon-list"),
   oneOnOneList: document.querySelector("#one-on-one-list"),
   stickyNoteText: document.querySelector("#sticky-note-text"),
+  bigPictureRemindersForm: document.querySelector("#big-picture-reminders-form"),
+  bigPictureRemindersInput: document.querySelector("#big-picture-reminders-input"),
+  bigPictureRemindersList: document.querySelector("#big-picture-reminders-list"),
   notificationPermission: document.querySelector("#notification-permission"),
   newTaskButton: document.querySelector("#new-task-button"),
   dialog: document.querySelector("#task-dialog"),
@@ -166,10 +172,10 @@ function createDefaultHomeTodo() {
   };
 }
 
-function createDefaultStickyNote() {
+function createDefaultStickyNote(id = STICKY_NOTE_ID, title = DEFAULT_STICKY_NOTE_TITLE) {
   return {
-    id: STICKY_NOTE_ID,
-    title: DEFAULT_STICKY_NOTE_TITLE,
+    id,
+    title,
     text: "",
     createdAt: 0,
     updatedAt: 0,
@@ -278,12 +284,22 @@ function getHomeTodoList() {
   return state.todoLists[0];
 }
 
-function getStickyNote() {
-  if (!state.stickyNotes.length) {
-    state.stickyNotes = [createDefaultStickyNote()];
-  }
+function getStickyNote(noteId = STICKY_NOTE_ID) {
+  const id = normalizeText(noteId) || STICKY_NOTE_ID;
+  const existingNote = state.stickyNotes.find((note) => note.id === id);
+  if (existingNote) return existingNote;
 
-  return state.stickyNotes[0];
+  const defaultNote = id === STICKY_NOTE_ID
+    ? createDefaultStickyNote()
+    : createDefaultStickyNote(id, statusLabelFromId(id));
+  state.stickyNotes.push(defaultNote);
+  return defaultNote;
+}
+
+function getStickyNoteFields() {
+  return [
+    { id: STICKY_NOTE_ID, element: els.stickyNoteText },
+  ].filter((field) => field.element);
 }
 
 function getTodoListById(todoListId) {
@@ -577,6 +593,7 @@ function normalizeRemoteState(remoteState) {
     todoLists: dedupeRecordsById(normalizeTodoLists(remoteState?.todoLists || remoteState?.todoList)),
     oneOnOnes: normalizeOneOnOnes(remoteState?.oneOnOnes),
     stickyNotes: normalizeStickyNotes(remoteState?.stickyNotes || remoteState?.stickyNote),
+    bigPictureReminders: normalizeBigPictureReminders(remoteState?.bigPictureReminders, remoteState?.stickyNotes || remoteState?.stickyNote),
   };
 }
 
@@ -646,8 +663,18 @@ function normalizeTodoList(todoList) {
 
 function normalizeStickyNotes(stickyNotes) {
   const source = Array.isArray(stickyNotes) ? stickyNotes : stickyNotes ? [stickyNotes] : [];
-  const normalized = source.map(normalizeStickyNote).filter(Boolean);
-  return normalized.length ? normalized : [createDefaultStickyNote()];
+  const notesById = new Map([[STICKY_NOTE_ID, createDefaultStickyNote()]]);
+
+  source.forEach((stickyNote) => {
+    const normalized = normalizeStickyNote(stickyNote);
+    if (!normalized || normalized.id === LEGACY_BIG_PICTURE_REMINDERS_ID) return;
+    notesById.set(normalized.id, {
+      ...notesById.get(normalized.id),
+      ...normalized,
+    });
+  });
+
+  return [...notesById.values()];
 }
 
 function normalizeStickyNote(stickyNote) {
@@ -660,6 +687,40 @@ function normalizeStickyNote(stickyNote) {
     text: typeof stickyNote.text === "string" ? stickyNote.text : "",
     createdAt,
     updatedAt: Number(stickyNote.updatedAt) || createdAt,
+  };
+}
+
+function normalizeBigPictureReminders(reminders, legacyStickyNotes = []) {
+  const source = Array.isArray(reminders) ? reminders : [];
+  const normalized = source.map(normalizeBigPictureReminder).filter(Boolean);
+  const legacyNote = Array.isArray(legacyStickyNotes)
+    ? legacyStickyNotes.find((note) => note?.id === LEGACY_BIG_PICTURE_REMINDERS_ID && normalizeText(note.text))
+    : null;
+
+  if (!normalized.length && legacyNote) {
+    const createdAt = Number(legacyNote.createdAt) || nowMs();
+    normalized.push({
+      id: "big-picture-reminder-legacy",
+      title: normalizeText(legacyNote.text),
+      createdAt,
+      updatedAt: Number(legacyNote.updatedAt) || createdAt,
+    });
+  }
+
+  return dedupeRecordsById(normalized).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function normalizeBigPictureReminder(reminder) {
+  if (!reminder || typeof reminder !== "object") return null;
+  const title = normalizeText(reminder.title || reminder.text);
+  if (!title) return null;
+  const createdAt = Number(reminder.createdAt) || nowMs();
+
+  return {
+    id: normalizeText(reminder.id) || uid("big-picture-reminder"),
+    title,
+    createdAt,
+    updatedAt: Number(reminder.updatedAt) || createdAt,
   };
 }
 
@@ -744,6 +805,7 @@ function getPersistableState() {
     todoLists: state.todoLists,
     oneOnOnes: state.oneOnOnes,
     stickyNotes: state.stickyNotes,
+    bigPictureReminders: state.bigPictureReminders,
   };
 }
 
@@ -755,6 +817,7 @@ function applySavedState(savedState) {
   state.todoLists = savedState.todoLists;
   state.oneOnOnes = savedState.oneOnOnes;
   state.stickyNotes = savedState.stickyNotes;
+  state.bigPictureReminders = savedState.bigPictureReminders;
 }
 
 async function requestJson(url, options = {}) {
@@ -905,6 +968,7 @@ function render() {
   renderDueSoon();
   renderOneOnOnes();
   renderStickyNote();
+  renderBigPictureReminders();
   renderNotificationButton();
   renderSyncStatus();
 }
@@ -1244,12 +1308,30 @@ function renderOneOnOnes() {
 }
 
 function renderStickyNote() {
-  if (!els.stickyNoteText) return;
-  const stickyNote = getStickyNote();
+  getStickyNoteFields().forEach((field) => {
+    const stickyNote = getStickyNote(field.id);
+    if (document.activeElement !== field.element) {
+      field.element.value = stickyNote.text;
+    }
+  });
+}
 
-  if (document.activeElement !== els.stickyNoteText) {
-    els.stickyNoteText.value = stickyNote.text;
-  }
+function renderBigPictureReminders() {
+  if (!els.bigPictureRemindersList) return;
+
+  const reminders = [...state.bigPictureReminders].sort((a, b) => b.createdAt - a.createdAt);
+  els.bigPictureRemindersList.innerHTML = reminders.length
+    ? reminders.map(renderBigPictureReminderCard).join("")
+    : `<p class="empty-state">No reminders yet.</p>`;
+}
+
+function renderBigPictureReminderCard(reminder) {
+  return `
+    <div class="big-picture-reminder-card" data-big-picture-reminder-id="${escapeAttr(reminder.id)}">
+      <span>${escapeHtml(reminder.title)}</span>
+      <button class="icon-button" type="button" data-big-picture-reminder-action="delete" aria-label="Delete reminder">x</button>
+    </div>
+  `;
 }
 
 function renderOneOnOneCard(person) {
@@ -1943,8 +2025,8 @@ function updateHomeTodo(updates, shouldRender = false, saveImmediately = false) 
   }
 }
 
-function updateStickyNote(updates, saveImmediately = false) {
-  const stickyNote = getStickyNote();
+function updateStickyNote(noteId, updates, saveImmediately = false) {
+  const stickyNote = getStickyNote(noteId);
   const currentTime = nowMs();
 
   Object.assign(stickyNote, updates, {
@@ -1959,6 +2041,45 @@ function updateStickyNote(updates, saveImmediately = false) {
   } else {
     scheduleStickyNotePersist();
   }
+}
+
+function createBigPictureReminder(title) {
+  const timestamp = nowMs();
+  return {
+    id: uid("big-picture-reminder"),
+    title,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function addBigPictureReminder() {
+  const title = normalizeText(els.bigPictureRemindersInput?.value);
+
+  if (!title) {
+    els.bigPictureRemindersInput?.focus();
+    showToast("Add a reminder first");
+    return;
+  }
+
+  state.bigPictureReminders.unshift(createBigPictureReminder(title));
+  if (els.bigPictureRemindersInput) {
+    els.bigPictureRemindersInput.value = "";
+    els.bigPictureRemindersInput.focus();
+  }
+  renderBigPictureReminders();
+  persist();
+  showToast("Reminder added");
+}
+
+function deleteBigPictureReminder(reminderId) {
+  const id = normalizeText(reminderId);
+  if (!id) return;
+
+  state.bigPictureReminders = state.bigPictureReminders.filter((reminder) => reminder.id !== id);
+  renderBigPictureReminders();
+  persist();
+  showToast("Reminder deleted");
 }
 
 function updateHomeTodoItem(itemId, updates, shouldRender = false, saveImmediately = false) {
@@ -2259,7 +2380,26 @@ els.oneOnOneList.addEventListener("input", (event) => {
 
 if (els.stickyNoteText) {
   els.stickyNoteText.addEventListener("input", (event) => {
-    updateStickyNote({ text: event.target.value });
+    updateStickyNote(STICKY_NOTE_ID, { text: event.target.value });
+  });
+}
+
+if (els.bigPictureRemindersForm) {
+  els.bigPictureRemindersForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addBigPictureReminder();
+  });
+}
+
+if (els.bigPictureRemindersList) {
+  els.bigPictureRemindersList.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-big-picture-reminder-action]");
+    if (!action) return;
+
+    const card = action.closest("[data-big-picture-reminder-id]");
+    if (action.dataset.bigPictureReminderAction === "delete") {
+      deleteBigPictureReminder(card?.dataset.bigPictureReminderId);
+    }
   });
 }
 
